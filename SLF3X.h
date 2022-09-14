@@ -27,9 +27,9 @@
 #define SCALE_FACTOR_TEMP   200.0 // 200 per degrees Celsius
 #define SCALE_FACTOR_FLOW   10.0  // 10 per (microliter per minute)
 
-#define FLOW_IDX            0     // Where data is stored in readings array
-#define TEMP_IDX            1
-#define FLAG_IDX            2
+#define SLF3X_FLOW_IDX      0     // Where data is stored in readings array
+#define SLF3X_TEMP_IDX      1
+#define SLF3X_FLAG_IDX      2
 
 // Function headers
 bool    SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium);
