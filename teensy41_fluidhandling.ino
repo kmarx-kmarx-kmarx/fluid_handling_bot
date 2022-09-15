@@ -16,6 +16,7 @@
 
     Dependencies:
         SLF3X.h     : Functions for initializing and reading from the flow sensor
+        SSCX.h      : Functions for reading from the pressure sensor
         OPX350.h    : Functions for initializing and reading from the bubble sensor
         Wire.h      : For I2C communication
 
@@ -25,6 +26,7 @@
 
 #include <Wire.h>
 #include "SLF3X.h"
+#include "SSCX.h"
 #include "OPX350.h"
 
 // SLF3X flow sensor parameters
@@ -124,12 +126,15 @@ void loop() {
     if (SLF3X_present) {
       SLF3X_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_readings);
     }
-    if (OCB350_0_present){
+    if (OCB350_0_present) {
       OCB350_0_reading = OPX350_read(OCB350_0_LOGIC);
     }
-    if (OCB350_1_present){
+    if (OCB350_1_present) {
       OCB350_1_reading = OPX350_read(OCB350_1_LOGIC);
     }
+
+    SSCX_0_err = SSCX_read(W_SSCX, SSCX_0_readings);
+    SSCX_1_err = SSCX_read(W_SSCX, SSCX_1_readings);
   }
   if (flag_send_update) {
     flag_send_update = false;
@@ -152,6 +157,18 @@ void loop() {
       Serial.print("OCB350_1 Bubbles Present: ");
       Serial.println(OCB350_1_reading, BIN);
     }
+    Serial.print("SSCX_0 Error:    ");
+    Serial.println(SSCX_0_err, BIN);
+    Serial.print("Pressure (psi): ");
+    Serial.println(SSCX_to_psi(SSCX_0_readings[SSCX_PRESS_IDX]));
+    Serial.print("Temp (deg C):  ");
+    Serial.println(SSCX_to_celsius(SSCX_0_readings[SSCX_TEMP_IDX]));
+    Serial.print("SSCX_1 Error:    ");
+    Serial.println(SSCX_1_err, BIN);
+    Serial.print("Pressure (psi): ");
+    Serial.println(SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]));
+    Serial.print("Temp (deg C):  ");
+    Serial.println(SSCX_to_celsius(SSCX_1_readings[SSCX_TEMP_IDX]));
     Serial.println(millis());
   }
 }

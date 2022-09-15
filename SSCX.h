@@ -27,6 +27,9 @@
 #define SSCX_LOWTEMP_SHIFT         5 // bits to shift the low byte
 #define SSCX_HITEMP_SHIFT (8 - SSCX_LOWTEMP_SHIFT)
 
+#define SSCX_PRESS_IDX    0
+#define SSCX_TEMP_IDX     1
+
 // Function headers
 uint8_t SSCX_read(TwoWire &W, int16_t *readings);
 float   SSCX_to_celsius(int16_t raw_temp);
