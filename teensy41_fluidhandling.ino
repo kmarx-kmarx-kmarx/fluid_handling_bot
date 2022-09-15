@@ -10,10 +10,13 @@
         set_send_update_flag():  set a global bool indicating the status should be sent over serial
 
     Shared Variables:
-        None
+        bool    SLF3X_present = false;
+  int16_t SLF3X_readings[3];
+  uint8_t SLF3X_err;
 
     Dependencies:
         SLF3X.h     : Functions for initializing and reading from the flow sensor
+        OPX350.h    : Functions for initializing and reading from the bubble sensor
         Wire.h      : For I2C communication
 
     Author: Kevin Marx
@@ -22,15 +25,26 @@
 
 #include <Wire.h>
 #include "SLF3X.h"
+#include "OPX350.h"
 
 // SLF3X flow sensor parameters
 #define W_SLF3X      Wire1
-#define NTRIES_SLF3X 10
+#define SLF3X_NTRIES 10
 #define PERFORM_CRC  true
 // SLF3X flow sensor variables
-bool    flow_sensor_present = false;
+bool    SLF3X_present = false;
 int16_t SLF3X_readings[3];
 uint8_t SLF3X_err;
+
+// OPX350 bubble sensor parameters
+// bubble sensor 0
+#define OCB350_0_CALIB  29
+#define OCB350_0_LOGIC  30
+bool    OCB350_0_present = false;
+// bubble sensor 1
+#define OCB350_1_CALIB  31
+#define OCB350_1_LOGIC  32
+bool    OCB350_1_present = false;
 
 // Timer parameters
 // Set flag to read the sensors every 5 ms
@@ -47,11 +61,34 @@ void setup() {
   // Initialize Serial
   Serial.begin(2000000);
   // Initialize flow sensor
-  int16_t n_tries = -1;
-  do {
-    flow_sensor_present = SLF3X_init(NTRIES_SLF3X, W_SLF3X, MEDIUM_WATER);
-    n_tries++;
-  } while (n_tries < NTRIES_SLF3X && flow_sensor_present != true);
+  Serial.print("Initializing flow sensor... ");
+  SLF3X_present = SLF3X_init(SLF3X_NTRIES, W_SLF3X, MEDIUM_WATER);
+  if (SLF3X_present) {
+    Serial.println("initialized");
+  }
+  else {
+    Serial.println("not detected");
+  }
+
+  // Initialize and calibrate the bubble sensors
+  Serial.print("Initializing bubble sensor 0. Make sure logic output A is connected... ");
+  OPX350_init(OBC350_0_LOGIC, OBC350_0_CALIB);
+  OCB350_0_present =  OPX350_calib(OBC350_0_LOGIC, OBC350_0_CALIB);
+  if (OCB350_0_present) {
+    Serial.println("calibrated");
+  }
+  else {
+    Serial.println("calibration failed");
+  }
+  Serial.print("Initializing bubble sensor 1. Make sure logic output A is connected... ");
+  OPX350_init(OBC350_1_LOGIC, OBC350_1_CALIB);
+  OCB350_1_present =  OPX350_calib(OBC350_1_LOGIC, OBC350_1_CALIB);
+  if (OCB350_1_present) {
+    Serial.println("calibrated");
+  }
+  else {
+    Serial.println("calibration failed");
+  }
 
   // Initialize timed interrupts
   // When they trigger, set a flag to indicate something should be done the next loop cycle
@@ -64,14 +101,14 @@ void loop() {
   // Handle the timer flags first
   if (flag_read_sensors) {
     flag_read_sensors = false;
-    if (flow_sensor_present) {
+    if (SLF3X_present) {
       SLF3X_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_readings);
     }
   }
   if (flag_send_update) {
     flag_send_update = false;
-    if (flow_sensor_present) {
-      Serial.println("~~~~~~~~~~~~~~~~~~~");
+    Serial.println("~~~~~~~~~~~~~~~~~~~");
+    if (SLF3X_present) {
       Serial.print("SLF3X Error:   ");
       Serial.println(SLF3X_err, BIN);
       Serial.print("Flow (uL/min): ");
@@ -81,10 +118,16 @@ void loop() {
       Serial.print("Flags:       ");
       Serial.println(SLF3X_readings[SLF3X_FLAG_IDX], BIN);
     }
+    if (OCB350_0_present) {
+      Serial.print("OCB350_0 Bubbles Present: ");
+      Serial.println(OPX350_read(OBC350_0_LOGIC), BIN);
+    }
+    if (OCB350_1_present) {
+      Serial.print("OCB350_1 Bubbles Present: ");
+      Serial.println(OPX350_read(OBC350_1_LOGIC), BIN);
+    }
     Serial.println(millis());
   }
-
-
 }
 
 void set_read_sensors_flag() {
