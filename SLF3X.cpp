@@ -38,7 +38,7 @@
 
   GLOBAL VARIABLES: None
 
-  DEPENDENCIES: Wire.h
+  DEPENDENCIES: None
   -----------------------------------------------------------------------------
 */
 static uint8_t calculate_crc(uint8_t *dat) {
@@ -75,7 +75,8 @@ static uint8_t calculate_crc(uint8_t *dat) {
 
   LOCAL VARIABLES: None
 
-  SHARED VARIABLES: None
+  SHARED VARIABLES: 
+      TwoWire &W:          I2C class
 
   GLOBAL VARIABLES: None
 
@@ -148,6 +149,7 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
   LOCAL VARIABLES: None
 
   SHARED VARIABLES:
+     TwoWire &W:          I2C class
      int16_t readings[3]: Used to store the data. We are writing to this array.
         readings[0]: raw flow value
         readings[1]: raw temp value

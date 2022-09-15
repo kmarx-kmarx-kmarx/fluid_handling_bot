@@ -26,11 +26,11 @@
         volatile bool flag_read_sensors - indicates the sensors should be read during the next loop
         volatile bool flag_send_update  - indicates debug data should be sent during the next loop
 
-
     Dependencies:
         SLF3X.h     : Functions for initializing and reading from the flow sensor
-        SSCX.h      : Functions for reading from the pressure sensor
+        SSCX.h      : Functions for initializing and reading from the pressure sensor
         OPX350.h    : Functions for initializing and reading from the bubble sensor
+        TTP.h       : Functions for initializing, reading from, and writing to the disc pump
         Wire.h      : For I2C communication
 
     Author: Kevin Marx
@@ -41,6 +41,7 @@
 #include "SLF3X.h"
 #include "SSCX.h"
 #include "OPX350.h"
+#include "TTP.h"
 
 // SLF3X flow sensor parameters
 #define W_SLF3X      Wire1
@@ -74,6 +75,12 @@ uint8_t SSCX_0_err;
 bool    SSCX_1_PRESENT = false;
 int16_t SSCX_1_readings[2];
 uint8_t SSCX_1_err;
+
+// Disc pump parameters
+#define UART_TTP             Serial8
+#define TTP_SELECTED_MODE    TTP_MODE_MANUAL
+#define TTP_SELECTED_STREAM  TTP_STREAM_DISABLE
+#define TTP_SELECTED_SRC     TTP_SRC_SETVAL
 
 // Timer parameters
 // Set flag to read the sensors every 5 ms

@@ -33,7 +33,7 @@
 
   GLOBAL VARIABLES: None
 
-  DEPENDENCIES: None
+  DEPENDENCIES: Arduino.h
   -----------------------------------------------------------------------------
 */
 void OPX350_init(uint8_t logic_pin, uint8_t calib_pin) {
@@ -65,7 +65,7 @@ void OPX350_init(uint8_t logic_pin, uint8_t calib_pin) {
 
   GLOBAL VARIABLES: None
 
-  DEPENDENCIES: None
+  DEPENDENCIES: Arduino.h
   -----------------------------------------------------------------------------
 */
 bool OPX350_calib(uint8_t logic_pin, uint8_t calib_pin) {
@@ -84,7 +84,7 @@ bool OPX350_calib(uint8_t logic_pin, uint8_t calib_pin) {
   // debugging - get estimate of time it takes for calibration to succeed
   Serial.println(t_init - millis());
 
-  // If calibration failed, reading is false
+  // If calibration failed, reading is low
   return reading;
 
 }
@@ -93,7 +93,7 @@ bool OPX350_calib(uint8_t logic_pin, uint8_t calib_pin) {
   -----------------------------------------------------------------------------
   DESCRIPTION: OPX350_read() returns true if bubbles are present and false otherwise
 
-  OPERATION:   Return opposite of logic_pin's state
+  OPERATION:   Return logic_pin's state
 
   ARGUMENTS:
       uint8_t logic_pin: pin number of the logic-level bubble signal
@@ -108,9 +108,9 @@ bool OPX350_calib(uint8_t logic_pin, uint8_t calib_pin) {
 
   GLOBAL VARIABLES: None
 
-  DEPENDENCIES: None
+  DEPENDENCIES: Arduino.h
   -----------------------------------------------------------------------------
 */
 bool OPX350_read(uint8_t logic_pin) {
-  return !digitalRead(logic_pin);
+  return digitalRead(logic_pin);
 }

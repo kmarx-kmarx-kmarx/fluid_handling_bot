@@ -40,6 +40,7 @@ void SSCX_init(TwoWire &W){
   LOCAL VARIABLES: None
 
   SHARED VARIABLES:
+     TwoWire &W:          I2C class
      int16_t readings[2]: Used to store the data. We are writing to this array.
         readings[0]: raw pressure value
         readings[1]: raw temperature value
