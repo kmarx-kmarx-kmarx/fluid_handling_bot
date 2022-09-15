@@ -10,9 +10,22 @@
         set_send_update_flag():  set a global bool indicating the status should be sent over serial
 
     Shared Variables:
-        bool    SLF3X_present = false;
-  int16_t SLF3X_readings[3];
-  uint8_t SLF3X_err;
+        bool    SLF3X_present          - set true when the flow sensor is initialized properly
+        int16_t SLF3X_readings[3]      - stores flow, temperature, and flag readings from the flow sensor
+        uint8_t SLF3X_err;             - stores data on how the reading went
+        bool    OCB350_0_present       - set true when bubble sensor 0 is calibrated properly
+        bool    OCB350_0_reading       - set true when bubbles are present in sensor 0
+        bool    OCB350_1_present
+        bool    OCB350_1_reading
+        bool    SSCX_0_PRESENT         - set true when pressure sensor 0 is iniialized properly
+        int16_t SSCX_0_readings[2]     - stores pressure and temperature readings from the pressure sensor
+        uint8_t SSCX_0_err;            - stores data on how the reading went
+        bool    SSCX_1_PRESENT
+        int16_t SSCX_1_readings[2]
+        uint8_t SSCX_1_err
+        volatile bool flag_read_sensors - indicates the sensors should be read during the next loop
+        volatile bool flag_send_update  - indicates debug data should be sent during the next loop
+
 
     Dependencies:
         SLF3X.h     : Functions for initializing and reading from the flow sensor
@@ -74,11 +87,8 @@ volatile bool flag_send_update = false;
 IntervalTimer Timer_send_update_input;
 
 void setup() {
-  // Initialize Serial
+  // Initialize Serial to communicate with the computer
   Serial.begin(2000000);
-  // Initialize I2C for the sensors
-  W_SLF3X.begin();
-  W_SSCX.begin();
 
   // Initialize flow sensor
   Serial.print("Initializing flow sensor... ");
@@ -110,19 +120,23 @@ void setup() {
     Serial.println("calibration failed");
   }
 
-  // Pressure sensor doesn't need to be initialized
+  // Initialize pressure sensor
+  SSCX_init(W_SSCX);
 
   // Initialize timed interrupts
   // When they trigger, set a flag to indicate something should be done the next loop cycle
   Timer_read_sensors_input.begin(set_read_sensors_flag, READ_SENSORS_INTERVAL_US);
   Timer_send_update_input.begin(set_send_update_flag, SEND_UPDATE_INTERVAL_US);
-
 }
 
 void loop() {
+  // flag to indicate fresh data in the shared variables
+  bool sensors_read = false;
+
   // Handle the timer flags first
   if (flag_read_sensors) {
     flag_read_sensors = false;
+    sensors_read = true;
     if (SLF3X_present) {
       SLF3X_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_readings);
     }

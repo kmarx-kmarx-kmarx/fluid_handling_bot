@@ -11,6 +11,11 @@
 */
 #include "SSCX.h"
 
+void SSCX_init(TwoWire &W){
+  W.begin();
+  return;
+}
+
 /*
   -----------------------------------------------------------------------------
   DESCRIPTION: SSCX_read() reads the raw pressure, temperature, and flags from the sensor over I2C. The flags are returned in a uint8_t and the pressure and temperature are written to a shared array

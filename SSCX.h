@@ -31,6 +31,7 @@
 #define SSCX_TEMP_IDX     1
 
 // Function headers
+void    SSCX_init(TwoWire &W);
 uint8_t SSCX_read(TwoWire &W, int16_t *readings);
 float   SSCX_to_celsius(int16_t raw_temp);
 float   SSCX_to_psi(int16_t raw_press);

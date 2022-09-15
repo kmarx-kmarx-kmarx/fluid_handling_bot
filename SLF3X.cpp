@@ -86,6 +86,8 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
   uint16_t n = 0;
   int8_t ret = 0;
 
+  W.begin();
+
   n_tries++; // Account for guaranteed 2 tries (1 resetting, 1 reading)
 
   do {
