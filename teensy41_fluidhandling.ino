@@ -72,8 +72,8 @@ void setup() {
 
   // Initialize and calibrate the bubble sensors
   Serial.print("Initializing bubble sensor 0. Make sure logic output A is connected... ");
-  OPX350_init(OBC350_0_LOGIC, OBC350_0_CALIB);
-  OCB350_0_present =  OPX350_calib(OBC350_0_LOGIC, OBC350_0_CALIB);
+  OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
+  OCB350_0_present =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
   if (OCB350_0_present) {
     Serial.println("calibrated");
   }
@@ -81,8 +81,8 @@ void setup() {
     Serial.println("calibration failed");
   }
   Serial.print("Initializing bubble sensor 1. Make sure logic output A is connected... ");
-  OPX350_init(OBC350_1_LOGIC, OBC350_1_CALIB);
-  OCB350_1_present =  OPX350_calib(OBC350_1_LOGIC, OBC350_1_CALIB);
+  OPX350_init(OCB350_1_LOGIC, OCB350_1_CALIB);
+  OCB350_1_present =  OPX350_calib(OCB350_1_LOGIC, OCB350_1_CALIB);
   if (OCB350_1_present) {
     Serial.println("calibrated");
   }
@@ -120,11 +120,11 @@ void loop() {
     }
     if (OCB350_0_present) {
       Serial.print("OCB350_0 Bubbles Present: ");
-      Serial.println(OPX350_read(OBC350_0_LOGIC), BIN);
+      Serial.println(OPX350_read(OCB350_0_LOGIC), BIN);
     }
     if (OCB350_1_present) {
       Serial.print("OCB350_1 Bubbles Present: ");
-      Serial.println(OPX350_read(OBC350_1_LOGIC), BIN);
+      Serial.println(OPX350_read(OCB350_1_LOGIC), BIN);
     }
     Serial.println(millis());
   }
