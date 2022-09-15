@@ -4,7 +4,7 @@
 
     bool SLF3X_init: Initialize sensor on given I2C bus, returns false if sensor not present
       Arguments: uint16_t n_tries, TwoWire &W, uint8_t medium
-    uint8_t SLF3X_read: Read a value from the sensor on a given I2C bus and optionally perform the CRC. Returns flags indicating specific failures in the reading process
+    uint8_t SLF3X_read: Read a value from the sensor on a given I2C bus into the shared readings variable and optionally perform the CRC. Returns flags indicating specific failures in the reading process.
       Arguments: bool do_crc, TwoWire &W, int16_t *readings
     float SLF3X_to_celsius: Convert from raw to degrees Celsius
       Arguments: int16_t raw_temp
@@ -19,7 +19,7 @@
 
 /*
   -----------------------------------------------------------------------------
-  DESCRIPTION: calculate_crc() takes a two-byte array as an argument and returns the CRC-8
+  DESCRIPTION: calculate_crc() takes a two-uint8_t array as an argument and returns the CRC-8
 
   OPERATION:   We pass the data array by reference and perform a (non-destructive) CRC calculating operation using the CRC parameters defined in the sensor's datasheet, then we return the array.
 
@@ -85,7 +85,6 @@ static uint8_t calculate_crc(uint8_t *dat) {
 bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
   uint16_t n = 0;
   int8_t ret = 0;
-  W.begin();
 
   n_tries++; // Account for guaranteed 2 tries (1 resetting, 1 reading)
 
@@ -107,7 +106,7 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
   n_tries++;
   do {
     n++; // Additionally count number of tries setting the sensor
-    W.beginTransmission(SLF3x_ADDRESS);
+    W.beginTransmission(SLF3X_ADDRESS);
     W.write(START_CTS_MEAS);
     W.write(medium);
     ret = W.endTransmission();
@@ -128,7 +127,7 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
   -----------------------------------------------------------------------------
   DESCRIPTION: SLF3X_read() reads the raw flow rate, temperature, and flags from the sensor over I2C and optionally calculates the CRC. If there is a CRC mismatch, we return INT16_MAX in the array instead of the actual value
 
-  OPERATION:   We request 9 bytes from the sensor, flowh_high, flow_low, flow_crc, temp_high, temp_low, temp_crc, flags_high, flags_low, flags_crc. We read the data into a shared array and optionally perform the CRC; if the CRC fails or if there is some other error, we return false. If the read is successfull, return true.
+  OPERATION:   We request 9 uint8_ts from the sensor, flow_high, flow_low, flow_crc, temp_high, temp_low, temp_crc, flags_high, flags_low, flags_crc. We read the data into a shared array and optionally perform the CRC; if the CRC fails or if there is some other error, we return false. If the read is successfull, return true.
 
   ARGUMENTS:
       bool do_crc:       Set true if the CRC should be performed, set false otherwise
@@ -136,7 +135,7 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
       int16_t *readings: Pointer to array for storing data. The data at this array will be overwritten.
       
   RETURNS:
-      byte error: 0 if the reading succeeded, bits set if there was an error
+      uint8_t error: 0 if the reading succeeded, bits set if there was an error
         bit 0 set - couldn't get any readings
         bit 1 set - flow CRC failed
         bit 2 set - temperature CRC failed
@@ -148,6 +147,9 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
 
   SHARED VARIABLES:
      int16_t readings[3]: Used to store the data. We are writing to this array.
+        readings[0]: raw flow value
+        readings[1]: raw temp value
+        readings[3]: flags from the SLF3X
 
   GLOBAL VARIABLES: None
 
@@ -155,18 +157,18 @@ bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
   -----------------------------------------------------------------------------
 */
 uint8_t SLF3X_read(bool do_crc, TwoWire &W, int16_t *readings) {
-  byte    crc[3]; // store CRC
-  byte    rx[6];  // store raw data
-  byte    err = 0; // assume no error
-  byte    crc_calc;
+  uint8_t    crc[3];  // store CRC
+  uint8_t    rx[6];   // store raw data
+  uint8_t    err = 0; // assume no error
+  uint8_t    crc_calc;
 
   // put default values in readings[]
   for (uint8_t i = 0; i < 3; i++) {
     readings[i] = INT16_MAX;
   }
 
-  W.requestFrom(SLF3x_ADDRESS, 9);
-  // Return with error if we fail to read all the bytes
+  W.requestFrom(SLF3X_ADDRESS, 9);
+  // Return with error if we fail to read all the uint8_ts
   if (W.available() < 9) {
     err |= (1 << 0);
     return err;

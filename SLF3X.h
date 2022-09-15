@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 // Constants for operation
-#define SLF3x_ADDRESS       0x08  // hard-coded address in sensor
+#define SLF3X_ADDRESS       0x08  // hard-coded address in sensor
 #define GEN_RST_ADDRESS     0x00  // send reset signal to this address
 #define GEN_RST_CMD         0x06  // command to reset
 #define STOP_CTS_MEAS_HIGH  0x3F  // High byte of command to stop continuous measurement

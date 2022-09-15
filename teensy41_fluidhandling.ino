@@ -41,10 +41,24 @@ uint8_t SLF3X_err;
 #define OCB350_0_CALIB  29
 #define OCB350_0_LOGIC  30
 bool    OCB350_0_present = false;
+bool    OCB350_0_reading;
 // bubble sensor 1
 #define OCB350_1_CALIB  31
 #define OCB350_1_LOGIC  32
 bool    OCB350_1_present = false;
+bool    OCB350_1_reading;
+
+// SSCX pressure sensor parameters
+#define W_SSCX           Wire1
+// SSCX pressure sensor variables
+// pressure sensor 0
+bool    SSCX_0_PRESENT = false;
+int16_t SSCX_0_readings[2];
+uint8_t SSCX_0_err;
+// pressure sensor 1
+bool    SSCX_1_PRESENT = false;
+int16_t SSCX_1_readings[2];
+uint8_t SSCX_1_err;
 
 // Timer parameters
 // Set flag to read the sensors every 5 ms
@@ -60,6 +74,10 @@ IntervalTimer Timer_send_update_input;
 void setup() {
   // Initialize Serial
   Serial.begin(2000000);
+  // Initialize I2C for the sensors
+  W_SLF3X.begin();
+  W_SSCX.begin();
+
   // Initialize flow sensor
   Serial.print("Initializing flow sensor... ");
   SLF3X_present = SLF3X_init(SLF3X_NTRIES, W_SLF3X, MEDIUM_WATER);
@@ -90,6 +108,8 @@ void setup() {
     Serial.println("calibration failed");
   }
 
+  // Pressure sensor doesn't need to be initialized
+
   // Initialize timed interrupts
   // When they trigger, set a flag to indicate something should be done the next loop cycle
   Timer_read_sensors_input.begin(set_read_sensors_flag, READ_SENSORS_INTERVAL_US);
@@ -103,6 +123,12 @@ void loop() {
     flag_read_sensors = false;
     if (SLF3X_present) {
       SLF3X_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_readings);
+    }
+    if (OCB350_0_present){
+      OCB350_0_reading = OPX350_read(OCB350_0_LOGIC);
+    }
+    if (OCB350_1_present){
+      OCB350_1_reading = OPX350_read(OCB350_1_LOGIC);
     }
   }
   if (flag_send_update) {
@@ -120,11 +146,11 @@ void loop() {
     }
     if (OCB350_0_present) {
       Serial.print("OCB350_0 Bubbles Present: ");
-      Serial.println(OPX350_read(OCB350_0_LOGIC), BIN);
+      Serial.println(OCB350_0_reading, BIN);
     }
     if (OCB350_1_present) {
       Serial.print("OCB350_1 Bubbles Present: ");
-      Serial.println(OPX350_read(OCB350_1_LOGIC), BIN);
+      Serial.println(OCB350_1_reading, BIN);
     }
     Serial.println(millis());
   }
