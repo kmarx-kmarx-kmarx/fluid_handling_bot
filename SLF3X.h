@@ -31,8 +31,10 @@
 #define SLF3X_TEMP_IDX      1
 #define SLF3X_FLAG_IDX      2
 
+#define SLF3X_N_TRIES 10
+
 // Function headers
-bool    SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium);
+bool    SLF3X_init(TwoWire &W, uint8_t medium);
 uint8_t SLF3X_read(bool do_crc, TwoWire &W, int16_t *readings);
 float   SLF3X_to_celsius(int16_t raw_temp);
 float   SLF3X_to_uLmin(int16_t raw_flow);

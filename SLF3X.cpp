@@ -61,7 +61,7 @@ static uint8_t calculate_crc(uint8_t *dat) {
   -----------------------------------------------------------------------------
   DESCRIPTION: SLF3X_init() initializes the sensor on a given I2C bus. It returns true if it was initialized successfully and false otherwise.
 
-  OPERATION:   We first try sending reset signals until the chip is properly reset, then we send requests to put it in continuous mode. If the number of tries exceeds n_tries, give up and return false. Otherwise, the sensor was initialized properly and return true.
+  OPERATION:   We first try sending reset signals until the chip is properly reset, then we send requests to put it in continuous mode. If the number of tries exceeds SLF3X_N_TRIES, give up and return false. Otherwise, the sensor was initialized properly and return true.
 
   ARGUMENTS:
       uint16_t n_tries:  number of times to try resetting and reading from the sensor before giving up
@@ -83,9 +83,10 @@ static uint8_t calculate_crc(uint8_t *dat) {
   DEPENDENCIES: Wire.h
   -----------------------------------------------------------------------------
 */
-bool SLF3X_init(uint16_t n_tries, TwoWire &W, uint8_t medium) {
+bool SLF3X_init(TwoWire &W, uint8_t medium) {
   uint16_t n = 0;
   int8_t ret = 0;
+  uint16_t n_tries = SLF3X_N_TRIES;
 
   W.begin();
 

@@ -17,10 +17,10 @@
         bool    OCB350_0_reading       - set true when bubbles are present in sensor 0
         bool    OCB350_1_present
         bool    OCB350_1_reading
-        bool    SSCX_0_PRESENT         - set true when pressure sensor 0 is iniialized properly
+        bool    SSCX_0_present         - set true when pressure sensor 0 is iniialized properly
         int16_t SSCX_0_readings[2]     - stores pressure and temperature readings from the pressure sensor
         uint8_t SSCX_0_err;            - stores data on how the reading went
-        bool    SSCX_1_PRESENT
+        bool    SSCX_1_present
         int16_t SSCX_1_readings[2]
         uint8_t SSCX_1_err
         volatile bool flag_read_sensors - indicates the sensors should be read during the next loop
@@ -31,6 +31,7 @@
         SSCX.h      : Functions for initializing and reading from the pressure sensor
         OPX350.h    : Functions for initializing and reading from the bubble sensor
         TTP.h       : Functions for initializing, reading from, and writing to the disc pump
+        TITAN.h     : Functions for initializing, reading from, and writing to the selector valve
         Wire.h      : For I2C communication
 
     Author: Kevin Marx
@@ -45,12 +46,16 @@
 
 // SLF3X flow sensor parameters
 #define W_SLF3X      Wire1
-#define SLF3X_NTRIES 10
 #define PERFORM_CRC  true
 // SLF3X flow sensor variables
-bool    SLF3X_present = false;
-int16_t SLF3X_readings[3];
-uint8_t SLF3X_err;
+// flow sensor 0
+bool    SLF3X_0_present = false;
+int16_t SLF3X_0_readings[3];
+uint8_t SLF3X_0_err;
+// flow sensor 1
+bool    SLF3X_1_present = false;
+int16_t SLF3X_1_readings[3];
+uint8_t SLF3X_1_err;
 
 // OPX350 bubble sensor parameters
 // bubble sensor 0
@@ -68,19 +73,31 @@ bool    OCB350_1_reading;
 #define W_SSCX           Wire1
 // SSCX pressure sensor variables
 // pressure sensor 0
-bool    SSCX_0_PRESENT = false;
+bool    SSCX_0_present = false;
 int16_t SSCX_0_readings[2];
 uint8_t SSCX_0_err;
 // pressure sensor 1
-bool    SSCX_1_PRESENT = false;
+bool    SSCX_1_present = false;
 int16_t SSCX_1_readings[2];
 uint8_t SSCX_1_err;
+
+// I2C bus select
+#define PIN_SENSOR_SELECT 15
+#define SELECT_SENSOR_0   LOW
+#define SELECT_SENSOR_1   HIGH
 
 // Disc pump parameters
 #define UART_TTP             Serial8
 #define TTP_SELECTED_MODE    TTP_MODE_MANUAL
 #define TTP_SELECTED_STREAM  TTP_STREAM_DISABLE
 #define TTP_SELECTED_SRC     TTP_SRC_SETVAL
+#define TTP_PWR_LIM_mW       1000
+// pump variables
+bool    TTP_present = false;
+
+// Selector valve parameters
+#define UART_TITAN          Serial5
+bool    TITAN_present = false;
 
 // Timer parameters
 // Set flag to read the sensors every 5 ms
@@ -97,10 +114,27 @@ void setup() {
   // Initialize Serial to communicate with the computer
   Serial.begin(2000000);
 
+  analogWriteResolution(10);
+  pinMode(PIN_SENSOR_SELECT, OUTPUT);
+  digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
+
+  while (!Serial) {
+    delay(1);
+  }
+
   // Initialize flow sensor
-  Serial.print("Initializing flow sensor... ");
-  SLF3X_present = SLF3X_init(SLF3X_NTRIES, W_SLF3X, MEDIUM_WATER);
-  if (SLF3X_present) {
+  Serial.print("Initializing flow sensor 0... ");
+  SLF3X_0_present = SLF3X_init(W_SLF3X, MEDIUM_WATER);
+  if (SLF3X_0_present) {
+    Serial.println("initialized");
+  }
+  else {
+    Serial.println("not detected");
+  }
+  digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
+  Serial.print("Initializing flow sensor 1... ");
+  SLF3X_1_present = SLF3X_init(W_SLF3X, MEDIUM_WATER);
+  if (SLF3X_1_present) {
     Serial.println("initialized");
   }
   else {
@@ -128,8 +162,17 @@ void setup() {
   }
 
   // Initialize pressure sensor
+  digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
+  SSCX_init(W_SSCX);
+  digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
   SSCX_init(W_SSCX);
 
+  // Initialize pump
+  TTP_present = TTP_init(UART_TTP, TTP_PWR_LIM_mW, TTP_SELECTED_SRC, TTP_SELECTED_MODE, TTP_SELECTED_STREAM);
+
+  // Initialize selector valve
+  TITAN_present = TITAN_init(UART_TITAN);
+  
   // Initialize timed interrupts
   // When they trigger, set a flag to indicate something should be done the next loop cycle
   Timer_read_sensors_input.begin(set_read_sensors_flag, READ_SENSORS_INTERVAL_US);
@@ -144,8 +187,13 @@ void loop() {
   if (flag_read_sensors) {
     flag_read_sensors = false;
     sensors_read = true;
-    if (SLF3X_present) {
-      SLF3X_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_readings);
+    if (SLF3X_0_present) {
+      digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
+      SLF3X_0_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_0_readings);
+    }
+    if (SLF3X_1_present) {
+      digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
+      SLF3X_1_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_1_readings);
     }
     if (OCB350_0_present) {
       OCB350_0_reading = OPX350_read(OCB350_0_LOGIC);
@@ -153,22 +201,33 @@ void loop() {
     if (OCB350_1_present) {
       OCB350_1_reading = OPX350_read(OCB350_1_LOGIC);
     }
-
+    digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
     SSCX_0_err = SSCX_read(W_SSCX, SSCX_0_readings);
+    digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
     SSCX_1_err = SSCX_read(W_SSCX, SSCX_1_readings);
   }
   if (flag_send_update) {
     flag_send_update = false;
     Serial.println("~~~~~~~~~~~~~~~~~~~");
-    if (SLF3X_present) {
-      Serial.print("SLF3X Error:   ");
-      Serial.println(SLF3X_err, BIN);
+    if (SLF3X_0_present) {
+      Serial.print("SLF3X 0 Error:   ");
+      Serial.println(SLF3X_0_err, BIN);
       Serial.print("Flow (uL/min): ");
-      Serial.println(SLF3X_to_uLmin(SLF3X_readings[SLF3X_FLOW_IDX]));
+      Serial.println(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]));
       Serial.print("Temp (deg C):  ");
-      Serial.println(SLF3X_to_celsius(SLF3X_readings[SLF3X_TEMP_IDX]));
+      Serial.println(SLF3X_to_celsius(SLF3X_0_readings[SLF3X_TEMP_IDX]));
       Serial.print("Flags:       ");
-      Serial.println(SLF3X_readings[SLF3X_FLAG_IDX], BIN);
+      Serial.println(SLF3X_0_readings[SLF3X_FLAG_IDX], BIN);
+    }
+    if (SLF3X_1_present) {
+      Serial.print("SLF3X 1 Error:   ");
+      Serial.println(SLF3X_1_err, BIN);
+      Serial.print("Flow (uL/min): ");
+      Serial.println(SLF3X_to_uLmin(SLF3X_1_readings[SLF3X_FLOW_IDX]));
+      Serial.print("Temp (deg C):  ");
+      Serial.println(SLF3X_to_celsius(SLF3X_1_readings[SLF3X_TEMP_IDX]));
+      Serial.print("Flags:       ");
+      Serial.println(SLF3X_1_readings[SLF3X_FLAG_IDX], BIN);
     }
     if (OCB350_0_present) {
       Serial.print("OCB350_0 Bubbles Present: ");
