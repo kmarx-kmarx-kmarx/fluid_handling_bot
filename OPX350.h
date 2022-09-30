@@ -14,7 +14,7 @@
 #include <Arduino.h>
 
 // Constants for operation
-#define CALIB_LOW_TIME_MS  20
+#define CALIB_LOW_TIME_MS  700
 #define CALIB_TIMEOUT_MS   1000
 
 // Function headers

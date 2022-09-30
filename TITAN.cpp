@@ -7,7 +7,9 @@
 
 */
 #include "TITAN.h"
-
+ uint16_t uart_titan_rx_ptr = 0;
+ byte uart_titan_rx_buffer[TITAN_BUFFER_SIZE];
+ 
 /*
   -----------------------------------------------------------------------------
   DESCRIPTION: TITAN_init() initializes the selector valve serial communications.
@@ -122,7 +124,7 @@ bool check_selector_valve_position(HardwareSerial &S)
 
 bool set_selector_valve_position_blocking(HardwareSerial &S, int pos)
 {
-  bool command_sent = set_selector_valve_position(pos);
+  bool command_sent = set_selector_valve_position(S, pos);
   if (command_sent == false)
     return false; // in the future can return an error code
 

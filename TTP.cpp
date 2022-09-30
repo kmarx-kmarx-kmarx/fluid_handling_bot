@@ -69,15 +69,18 @@ bool TTP_send_packet(HardwareSerial &S, char *tx_buffer, char *rx_buffer) {
     S.flush(); // Wait for any transmitted data still in buffers to actually transmit
 
     // wait for a response
-    time_0 = micros();
-    while (!S.available() && (micros() - time_0) < TTP_READ_TIMEOUT_uS) {
-      delayMicroseconds(5);
+    time_0 = millis();
+    while (!S.available() && (millis() - time_0) < TTP_READ_TIMEOUT_mS) {
+      delayMicroseconds(TTP_IDLETIME_uS);
     }
+    // wait for a response
+//    delay(200);
     // if we have a response, process it. otherwise, fall through to the next for loop
     if (S.available()) {
       // read every byte into the buffer
       while (S.available()) {
         rx_buffer[rx_ptr++] = S.read();
+        delayMicroseconds(TTP_IDLETIME_uS);
       }
       // We are expecting the response to echo the request and have additional data if we are reading from one of the pump's registers
       // If expectation met, return out. Otherwise, loop again
@@ -273,12 +276,12 @@ bool TTP_init(HardwareSerial &S, int16_t pwr_lim, uint8_t src, uint8_t mode, uin
   S.begin(TTP_BAUDRATE);
 
   // wait for the serial port to open
-  time_0 = micros();
-  while (!S && (micros() - time_0) < TTP_READ_TIMEOUT_uS) {
-    delayMicroseconds(10);
+  time_0 = millis();
+  while (!S && (millis() - time_0) < TTP_READ_TIMEOUT_mS) {
+    delayMicroseconds(TTP_IDLETIME_uS);
   }
   // time out
-  if((micros() - time_0) > TTP_READ_TIMEOUT_uS){
+  if ((millis() - time_0) > TTP_READ_TIMEOUT_mS) {
     success = false;
   }
 
@@ -286,8 +289,8 @@ bool TTP_init(HardwareSerial &S, int16_t pwr_lim, uint8_t src, uint8_t mode, uin
 
   // success is true only if all writes succeed
   success = TTP_write_register(S, TTP_PWR_LIMIT, (int16_t)pwr_lim)  && success;
-  success = TTP_write_register(S, TTP_MANUAL_SRC, (int16_t)src)     && success;
   success = TTP_write_register(S, TTP_CTRL_MODE, (int16_t)mode)     && success;
+  success = TTP_write_register(S, TTP_MANUAL_SRC, (int16_t)src)     && success;
   success = TTP_write_register(S, TTP_STREAM_MODE, (int16_t)stream) && success;
 
   return success;
@@ -413,7 +416,7 @@ bool TTP_set_target(HardwareSerial &S, float target) {
 */
 bool TTP_get_status(HardwareSerial &S, uint16_t &error_code, int16_t &drive_freq, float &drive_pwr, float &drive_current, float &drive_voltage, float &power_limit) {
   bool success = true;
-  
+
   error_code     = TTP_read_int(S, TTP_ERR_CODE);
   success = success & (error_code != TTP_INT_READ_ERR); // set success false if we fail to read
   drive_freq     = TTP_read_int(S, TTP_DRV_FREQ);
@@ -428,6 +431,6 @@ bool TTP_get_status(HardwareSerial &S, uint16_t &error_code, int16_t &drive_freq
   success = success & (error_code != TTP_FLT_READ_ERR);
   power_limit    = TTP_read_float(S, TTP_PWR_LIMIT);
   success = success & (error_code != TTP_FLT_READ_ERR);
-  
+
   return success;
 }

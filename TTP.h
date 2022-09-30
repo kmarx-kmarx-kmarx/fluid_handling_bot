@@ -37,10 +37,11 @@
 #define TTP_MIN_PWR          0
 #define TTP_MAX_PWR       1400
 
-#define TTP_BAUDRATE      115200  // disc pump baud rate
-#define TTP_BUFFER_SIZE       32  // 32 byte read/write buffer
-#define TTP_N_TRIES            3  // Try reading/writing 3 times
-#define TTP_READ_TIMEOUT_uS 10000 // wait this many microseconds before timing out
+#define TTP_BAUDRATE        115200 // disc pump baud rate
+#define TTP_BUFFER_SIZE         32 // 32 byte read/write buffer
+#define TTP_N_TRIES              3 // Try reading/writing 3 times
+#define TTP_READ_TIMEOUT_mS   2000 // wait this many microseconds before timing out
+#define TTP_IDLETIME_uS        300 // wait this many microseconds while idling
 
 #define TTP_INT_READ_ERR INT16_MIN
 #define TTP_FLT_READ_ERR FLT_MAX
