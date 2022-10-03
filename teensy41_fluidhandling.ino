@@ -53,15 +53,23 @@ byte internal_program = INTERNAL_PROGRAM_INITIAL;
 #define FLOWRATE_LOOP 2
 uint8_t pid_mode = IDLE_LOOP;
 float pres_pid_p_coeff = 1;
-float flow_pid_p_coeff = 1;
+float flow_pid_p_coeff = 2;
 float pid_i_error = 0;
 float pres_pid_i_coeff = 1;
-float flow_pid_i_coeff = 1;
+float flow_pid_i_coeff = 0.2;
 float pid_setpoint = 0;
 #define MIN_PRES_POWER 0
 #define MAX_PRES_POWER TTP_PWR_LIM_mW
-#define MIN_FLOW_POWER 50
+#define MIN_FLOW_POWER 0
 #define MAX_FLOW_POWER TTP_PWR_LIM_mW
+
+// Manual control params
+#define analog_deadzone 23           // ignore analog values below the dead zone
+#define ANALOG_MAX      1023
+#define MANUAL_PWR_MAX  TTP_PWR_LIM_mW
+#define MANUAL_MAX_FLOW_VAC   300.0     // max flow achievable when vacuum (uL/min)
+#define MANUAL_MIN_FLOW_PRES -100.0     // minimum flow achievable when pressure (uL/min)
+#define MANUAL_DEFAULT_MODE FLOWRATE_LOOP // default to flowrate loop
 
 // SLF3X flow sensor parameters
 #define W_SLF3X      Wire1
@@ -69,7 +77,7 @@ float pid_setpoint = 0;
 // Calibration param
 #define CHECK_PRESSURE_THRESH 5.50
 #define CHECK_VACUUM_THRESH  -4.25
-#define CHECK_TIMEOUT_MS     5000
+#define CHECK_TIMEOUT_MS     70000
 // SLF3X flow sensor variables
 // flow sensor 0
 bool    SLF3X_0_present = false;
@@ -124,17 +132,26 @@ IntervalTimer Timer_read_sensors_input;
 volatile bool flag_send_update = false;
 IntervalTimer Timer_send_update_input;
 
+// Set a flag to read manual inputs every 10 ms
+#define CHECK_MANUAL_INTERVAL_US 10000
+volatile bool flag_check_manual_inputs = false;
+volatile bool manual_control_enabled_by_software = false;
+IntervalTimer Timer_check_manual_input;
+
 
 void setup() {
   // Initialize Serial to communicate with the computer
   Serial.begin(2000000);
 
+  // initialize pins
+  pinMode(pin_manual_control_enable, INPUT_PULLUP); // manual ctrl enable button
+  pinMode(pin_pressure_vacuum, INPUT);       // pressure/vacuum selector switch
+  pinMode(pin_analog_in, INPUT);// potentiometer setpoint
+
   analogWriteResolution(10);
   // Initialize I2C selector
   pinMode(PIN_SENSOR_SELECT, OUTPUT);
   digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
-
-
 
   while (!Serial) {
     delay(1);
@@ -209,21 +226,19 @@ void setup() {
 
 void loop() {
   // Init variables
-  int16_t SLF3X_0_readings[3];
-  uint8_t SLF3X_0_err;
-  int16_t SLF3X_1_readings[3];
-  uint8_t SLF3X_1_err;
-  bool    OCB350_0_reading;
-  bool    OCB350_1_reading;
-  int16_t SSCX_0_readings[2];
-  uint8_t SSCX_0_err;
-  int16_t SSCX_1_readings[2];
-  uint8_t SSCX_1_err;
-  //  byte    byte_rx;
+  int16_t  SLF3X_0_readings[3];
+  uint8_t  SLF3X_0_err;
+  int16_t  SLF3X_1_readings[3];
+  uint8_t  SLF3X_1_err;
+  bool     OCB350_0_reading;
+  bool     OCB350_1_reading;
+  int16_t  SSCX_0_readings[2];
+  uint8_t  SSCX_0_err;
+  int16_t  SSCX_1_readings[2];
+  uint8_t  SSCX_1_err;
   uint16_t time_0 = millis();
-  float disc_pump_power = 0;
-  float pressure;
-
+  float    disc_pump_power = 0;
+  float    pressure;
   // Handle the timer flags first
   if (flag_read_sensors) {
     flag_read_sensors = false;
@@ -260,7 +275,7 @@ void loop() {
         disc_pump_power = constrain(disc_pump_power, MIN_PRES_POWER, MAX_PRES_POWER);
         break;
       case FLOWRATE_LOOP:
-        measurement = SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]);
+        measurement = abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]));
         error = (pid_setpoint - measurement) / 1000;
         pid_i_error += error;
         pid_i_error = constrain(pid_i_error, 0, 1 / flow_pid_i_coeff);
@@ -270,7 +285,6 @@ void loop() {
       default:
         break;
     }
-    // Set the pump power
     TTP_set_target(UART_TTP, disc_pump_power);
 
     // Send an update only if the reading has been done
@@ -319,87 +333,121 @@ void loop() {
 
       Serial.print("NXP33996:      ");
       Serial.println(NXP33996_get_state(pin_33996_CS_0), BIN);
+
+      //     Print PID info
+      Serial.print("PID: ");
+      switch (pid_mode) {
+        case PRESSURE_LOOP:
+          Serial.println("Pressure Mode");
+          break;
+        case FLOWRATE_LOOP:
+          Serial.println("Flowrate Mode");
+          break;
+        default:
+          Serial.println("disabled; neglect PID info");
+      }
+      Serial.print("Target: ");
+      Serial.println(pid_setpoint);
+      Serial.print("Measurement: ");
+      Serial.println(measurement);
+      Serial.print("Power (mW): ");
+      Serial.println(disc_pump_power);
       Serial.println(millis());
     }
   }
-  //  // Handle Serial input
-  //  if (Serial.available()) {
-  //    byte_rx = Serial.read();
-  //    switch (rx_byte) {
-  //      case CMD_START_BYTE:
-  //        // If we are reading a new command, reset the idx and array
-  //        buffer_rx_ptr = 0;
-  //        memset(buffer_rx, 0, TO_MCU_CMD_LENGTH);
-  //        break;
-  //      default:
-  //        // Otherwise, read in the data. Throw out any bytes if they would cause buffer_rx to overflow
-  //        if (buffer_rx_ptr < TO_MCU_CMD_LENGTH) {
-  //          buffer_rx[buffer_rx_ptr++] = byte_rx;
-  //        }
-  //    }
-  //  }
-  //  // If our serial buffer is full, parse it.
-  //  if (buffer_rx_ptr >= TO_MCU_CMD_LENGTH) {
-  //    // Initialize local vars for parsing
-  //    // uint16_t current_command_uid  = uint16_t(buffer_rx[0]) * 256 + uint16_t(buffer_rx[1]);
-  //    uint8_t  current_command      = buffer_rx[2];
-  //    uint8_t  payload1             = buffer_rx[3];
-  //    uint8_t  payload2             = buffer_rx[4];
-  //    uint16_t payload3             = (uint16_t(buffer_rx[5]) << 8) + uint16_t(buffer_rx[6]);
-  //    uint32_t payload4             = (uint32_t(buffer_rx[7]) << 24) + (uint32_t(buffer_rx[8]) << 16) + (uint32_t(buffer_rx[9]) << 8) + (uint32_t(buffer_rx[10]));
-  //
-  //    switch(current_command){
-  //      case CLEAR:
-  //        // Clear the first two bytes of rx buffer - reset the command index
-  //        buffer_rx[0] = 0;
-  //        buffer_rx[1] = 0;
-  //        // Indicate we successfully are doing nothing
-  //        command_execution_status = COMPLETED_WITHOUT_ERRORS;
-  //        break;
-  //      case SET_MANUAL_CONTROL:
-  //        if (payload1 != CMD_ENABLE){
-  //          // enable manual control
-  //          manual_control_enabled_by_software = true;
-  //          // disable the pressure ctrl loop
-  //          disable_pid();
-  //        }
-  //        else {
-  //          // disable manual control
-  //          manual_control_enabled_by_software = false;
-  //        }
-  //      case
-  //    }
-  //  }
+
+  // Read the manual inputs
+  // if we have the flag to set them AND we don't have manual control disabled AND if the manual control button is pressed (active low signal)
+  if (flag_check_manual_inputs && manual_control_enabled_by_software) {
+    // If the manual control button is not pressed, shut everything down
+    // Get switch and potentiometer state
+    bool mode_pressure_vacuum = digitalRead(pin_pressure_vacuum);
+    bool manual_control_enable = !digitalRead(pin_manual_control_enable);
+    int16_t setpoint = analogRead(pin_analog_in);
+    // account for dead zone
+    setpoint = max(0, setpoint - analog_deadzone);
+
+    // if we don't have manual control enabled OR if we are in the deadzone OR manual control is not enabled, set power to 0
+    if (!manual_control_enable || setpoint == 0 || !manual_control_enabled_by_software) {
+      disable_pid();
+      TTP_set_target(UART_TTP, 0);
+
+      // reset the valves if manual ctrl not enabled
+      if (!manual_control_enable) {
+        reset_valves();
+      }
+    }
+    // Do error handling - don't let liquid past the other bubble sensor
+    else if (mode_pressure_vacuum && !OPX350_read(OCB350_1_LOGIC)) {
+      disable_pid();
+      TTP_set_target(UART_TTP, 0);
+      reset_valves();
+    }
+    // Otherwise, set the valves and setpoint
+    else {
+      // enable PID
+      pid_mode = MANUAL_DEFAULT_MODE;
+      // true - set vacumm mode
+      if (mode_pressure_vacuum) {
+        set_valves_vacuum();
+        // handle PID cases
+        switch (pid_mode) {
+          case PRESSURE_LOOP:
+            // TODO
+            break;
+          case FLOWRATE_LOOP:
+            // convert potentiometer setpoint to a flow value
+            pid_setpoint = abs(setpoint * MANUAL_MAX_FLOW_VAC / ANALOG_MAX);
+            break;
+        }
+
+      }
+      else {
+        set_valves_pressure();
+        // handle PID cases
+        switch (pid_mode) {
+          case PRESSURE_LOOP:
+            // TODO
+            break;
+          case FLOWRATE_LOOP:
+            pid_setpoint = abs(setpoint * MANUAL_MIN_FLOW_PRES / ANALOG_MAX);
+            break;
+        }
+      }
+    }
+  }
   // Run the state machine
   switch (internal_program) {
+    case INTERNAL_PROGRAM_IDLE:
+      break;
     case INTERNAL_PROGRAM_INITIAL:
       Serial.println("Starting demo program");
       Serial.println("Valve test (check LEDs)");
       // Test the valves
-      //      digitalWrite(pin_valve_0, HIGH);
-      //      delay(500);
-      //      digitalWrite(pin_valve_1, HIGH);
-      //      delay(500);
-      //      digitalWrite(pin_valve_2, HIGH);
-      //      delay(500);
-      //      digitalWrite(pin_valve_3, HIGH);
-      //      delay(500);
-      //      digitalWrite(pin_valve_4, HIGH);
-      //      delay(500);
-      //      digitalWrite(pin_valve_0, LOW);
-      //      delay(500);
-      //      digitalWrite(pin_valve_1, LOW);
-      //      delay(500);
-      //      digitalWrite(pin_valve_2, LOW);
-      //      delay(500);
-      //      digitalWrite(pin_valve_3, LOW);
-      //      delay(500);
-      //      digitalWrite(pin_valve_4, LOW);
-      //      delay(500);
+      digitalWrite(pin_valve_0, HIGH);
+      delay(50);
+      digitalWrite(pin_valve_1, HIGH);
+      delay(50);
+      digitalWrite(pin_valve_2, HIGH);
+      delay(50);
+      digitalWrite(pin_valve_3, HIGH);
+      delay(50);
+      digitalWrite(pin_valve_4, HIGH);
+      delay(50);
+      digitalWrite(pin_valve_0, LOW);
+      delay(50);
+      digitalWrite(pin_valve_1, LOW);
+      delay(50);
+      digitalWrite(pin_valve_2, LOW);
+      delay(50);
+      digitalWrite(pin_valve_3, LOW);
+      delay(50);
+      digitalWrite(pin_valve_4, LOW);
+      delay(50);
 
       // Test pressure
       digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
-      Serial.print("Pressure Test: ");
+      Serial.print("Pressure Test (fast): ");
       time_0 = millis();
       pressure = check_pressure();
       Serial.print(pressure > CHECK_PRESSURE_THRESH);
@@ -410,7 +458,7 @@ void loop() {
       Serial.println(" ms");
       // Test vacumm
       digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
-      Serial.print("Vacuum Test: ");
+      Serial.print("Vacuum Test (slow!): ");
       time_0 = millis();
       pressure = check_vacuum();
       Serial.print( pressure < CHECK_VACUUM_THRESH);
@@ -423,7 +471,9 @@ void loop() {
       // Initialize timed interrupts
       // When they trigger, set a flag to indicate something should be done the next loop cycle
       Timer_send_update_input.begin(set_send_update_flag, SEND_UPDATE_INTERVAL_US);
+      Timer_check_manual_input.begin(set_check_manual_input_flag, CHECK_MANUAL_INTERVAL_US);
 
+      manual_control_enabled_by_software = true;
       internal_program = INTERNAL_PROGRAM_IDLE;
       break;
     case INTERNAL_PROGRAM_REMOVE_MEDIUM:
@@ -446,7 +496,6 @@ void loop() {
       break;
     default:
       break;
-      //      asdfsadfsfasd;
   }
 }
 
@@ -458,6 +507,11 @@ void set_send_update_flag() {
   flag_send_update = true;
   return;
 }
+void set_check_manual_input_flag() {
+  flag_check_manual_inputs = true;
+  return;
+}
+
 
 void disable_pid() {
   // Clear integral error and disable the loop
@@ -501,11 +555,7 @@ float check_pressure() {
   TTP_set_target(UART_TTP, 0);
 
   // reset valves
-  digitalWrite(pin_valve_0, LOW);
-  digitalWrite(pin_valve_1, LOW);
-  digitalWrite(pin_valve_2, LOW);
-  digitalWrite(pin_valve_3, LOW);
-  digitalWrite(pin_valve_4, LOW);
+  reset_valves();
 
   return pressure;
 }
@@ -543,11 +593,65 @@ float check_vacuum() {
   // Stop pumping air
   TTP_set_target(UART_TTP, 0);
   // Reset valves
+  reset_valves();
+
+  return pressure;
+}
+
+void reset_valves() {
+  // all low - save energy
   digitalWrite(pin_valve_0, LOW);
   digitalWrite(pin_valve_1, LOW);
   digitalWrite(pin_valve_2, LOW);
   digitalWrite(pin_valve_3, LOW);
   digitalWrite(pin_valve_4, LOW);
+  return;
+}
+// get fluids from the samples into the reservior
+void set_valves_vacuum() {
+  // air gets sucked out of the first vacuum bottle and ejected from valve 0
 
-  return pressure;
+  // valve 0 connect to ambient air
+  digitalWrite(pin_valve_0, HIGH);
+  // connect reservior to vacuum bottle
+  digitalWrite(pin_valve_1, HIGH);
+  // connect fluid samples to reservior
+  digitalWrite(pin_valve_2, HIGH);
+  // connect vacuum bottle to next valve
+  digitalWrite(pin_valve_3, LOW);
+  // connect vacuum bottle to disc pump vacuum
+  digitalWrite(pin_valve_4, HIGH);
+  return;
+}
+// get fluids from the reservior to the open/closed chamber
+void set_valves_pressure() {
+  // air gets pushed into the second vacuum bottle from valve 4
+
+  // valve 0 connects the disc pup pressure to the system
+  digitalWrite(pin_valve_0, LOW);
+  // connect air pressure to the reservior
+  digitalWrite(pin_valve_1, LOW);
+  // connect reservior to open/closed chamber
+  digitalWrite(pin_valve_2, LOW);
+  // disconnect vacuum bottle (and open/closed chamber) from anything
+  digitalWrite(pin_valve_3, LOW);
+  // connect to ambient air
+  digitalWrite(pin_valve_4, LOW);
+  return;
+}
+// get fluids from the chamber to the second vacuum bottle using suction
+void set_valves_suction() {
+  // air gets pulled out of the second vacuum bottle and ejected from valve 0
+
+  // valve 0 connects to ambient air
+  digitalWrite(pin_valve_0, HIGH);
+  // connect the reservior to the first vacuum bottle
+  digitalWrite(pin_valve_1, HIGH);
+  // connect reservior to open/closed chamber
+  digitalWrite(pin_valve_2, LOW);
+  // connect vacuum bottle (and open/closed chamber) from anything
+  digitalWrite(pin_valve_3, HIGH);
+  // connect to disc pump suction
+  digitalWrite(pin_valve_4, HIGH);
+  return;
 }
