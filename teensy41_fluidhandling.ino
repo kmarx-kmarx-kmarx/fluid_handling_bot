@@ -15,7 +15,6 @@
         bool    OCB350_0_present       - set true when bubble sensor 0 is calibrated properly
         bool    OCB350_1_present
         bool    SSCX_0_present         - set true when pressure sensor 0 is iniialized properly
-
         bool    SSCX_1_present
 
         volatile bool flag_read_sensors - indicates the sensors should be read during the next loop
@@ -48,20 +47,11 @@ elapsedMillis elapsed_millis_since_the_start_of_the_internal_program = 0;
 byte internal_program = INTERNAL_PROGRAM_INITIAL;
 
 // PID control parameters and variables
-#define IDLE_LOOP     0
-#define PRESSURE_LOOP 1
-#define FLOWRATE_LOOP 2
+// Mode and setpoint persist over loops
 uint8_t pid_mode = IDLE_LOOP;
-float pres_pid_p_coeff = 1;
-float flow_pid_p_coeff = 2;
-float pid_i_error = 0;
-float pres_pid_i_coeff = 1;
-float flow_pid_i_coeff = 0.2;
 float pid_setpoint = 0;
-#define MIN_PRES_POWER 0
-#define MAX_PRES_POWER TTP_PWR_LIM_mW
-#define MIN_FLOW_POWER 0
-#define MAX_FLOW_POWER TTP_PWR_LIM_mW
+
+// Store volumes
 
 // Manual control params
 #define analog_deadzone 23           // ignore analog values below the dead zone
@@ -70,6 +60,9 @@ float pid_setpoint = 0;
 #define MANUAL_MAX_FLOW_VAC   300.0     // max flow achievable when vacuum (uL/min)
 #define MANUAL_MIN_FLOW_PRES -100.0     // minimum flow achievable when pressure (uL/min)
 #define MANUAL_DEFAULT_MODE FLOWRATE_LOOP // default to flowrate loop
+
+// Vacuum bottle pressure release threshold
+#define VB0_PRESSURE_THRESH -0.01
 
 // SLF3X flow sensor parameters
 #define W_SLF3X      Wire1
@@ -81,6 +74,8 @@ float pid_setpoint = 0;
 // SLF3X flow sensor variables
 // flow sensor 0
 bool    SLF3X_0_present = false;
+float   SLF3X_0_volume_mL  = 0;
+int32_t SLF3X_0_dt  = 0;
 // flow sensor 1
 bool    SLF3X_1_present = false;
 
@@ -148,6 +143,13 @@ void setup() {
   pinMode(pin_pressure_vacuum, INPUT);       // pressure/vacuum selector switch
   pinMode(pin_analog_in, INPUT);// potentiometer setpoint
 
+  pinMode(pin_valve_0, OUTPUT); // initialize pins
+  pinMode(pin_valve_1, OUTPUT);
+  pinMode(pin_valve_2, OUTPUT);
+  pinMode(pin_valve_3, OUTPUT);
+  pinMode(pin_valve_4, OUTPUT);
+  pinMode(pin_valve_5, OUTPUT);
+
   analogWriteResolution(10);
   // Initialize I2C selector
   pinMode(PIN_SENSOR_SELECT, OUTPUT);
@@ -176,7 +178,27 @@ void setup() {
     Serial.println("not detected");
   }
 
+  // Initialize pump
+  TTP_present = TTP_init(UART_TTP, TTP_PWR_LIM_mW, TTP_SELECTED_SRC, TTP_SELECTED_MODE, TTP_SELECTED_STREAM);
+  if (!TTP_present) {
+    Serial.println("Pump initialization failed");
+    while (true) {
+      delay(50000);
+    }
+  }
+  else {
+    Serial.println("Pump initialized");
+  }
+
+
   // Initialize and calibrate the bubble sensors
+  // Clear the lines
+  set_valves_pressure();
+  TTP_set_target(UART_TTP, TTP_MAX_PWR);
+  Serial.println("Clearing fluid...");
+  delay(5000);
+  TTP_set_target(UART_TTP, 0);
+  reset_valves();
   Serial.print("Initializing bubble sensor 0. Make sure logic output A is connected... ");
   OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
   OCB350_0_present =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
@@ -195,6 +217,8 @@ void setup() {
   else {
     Serial.println("calibration failed");
   }
+  Serial.println("Finishing calibration...");
+  delay(5000);
 
   // Initialize pressure sensor
   digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
@@ -202,14 +226,6 @@ void setup() {
   digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
   SSCX_init(W_SSCX);
 
-  // Initialize pump
-  TTP_present = TTP_init(UART_TTP, TTP_PWR_LIM_mW, TTP_SELECTED_SRC, TTP_SELECTED_MODE, TTP_SELECTED_STREAM);
-  if (!TTP_present) {
-    Serial.println("Pump initialization failed");
-    while (true) {
-      delay(50000);
-    }
-  }
 
   // Initialize selector valve
   TITAN_present = TITAN_init(UART_TITAN);
@@ -237,7 +253,6 @@ void loop() {
   int16_t  SSCX_1_readings[2];
   uint8_t  SSCX_1_err;
   uint16_t time_0 = millis();
-  float    disc_pump_power = 0;
   float    pressure;
   // Handle the timer flags first
   if (flag_read_sensors) {
@@ -263,32 +278,13 @@ void loop() {
 
 
     // Once all the sensors are read, perform the control loop to calculate the new pump power
-    float error;
-    float measurement;
-    switch (pid_mode) {
-      case PRESSURE_LOOP:
-        measurement = SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]);
-        error = pid_setpoint - measurement;
-        pid_i_error += error;
-        pid_i_error = constrain(pid_i_error, 0, (1 / pres_pid_i_coeff));
-        disc_pump_power = int((pid_i_error * pres_pid_i_coeff + error * pres_pid_p_coeff) * MAX_PRES_POWER);
-        disc_pump_power = constrain(disc_pump_power, MIN_PRES_POWER, MAX_PRES_POWER);
-        break;
-      case FLOWRATE_LOOP:
-        measurement = abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]));
-        error = (pid_setpoint - measurement) / 1000;
-        pid_i_error += error;
-        pid_i_error = constrain(pid_i_error, 0, 1 / flow_pid_i_coeff);
-        disc_pump_power = int((pid_i_error * flow_pid_i_coeff + error * flow_pid_p_coeff) * MAX_PRES_POWER);
-        disc_pump_power = constrain(disc_pump_power, MIN_FLOW_POWER, MAX_FLOW_POWER);
-        break;
-      default:
-        break;
-    }
-    TTP_set_target(UART_TTP, disc_pump_power);
+    // Initialize shared variables
+    float    disc_pump_power = 0;
+    float    measurement = 0;
+    pid_loop(UART_TTP, pid_mode, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]), pid_setpoint, measurement, disc_pump_power);
 
     // Send an update only if the reading has been done
-    if (flag_send_update) {
+    if (flag_send_update && false) {
       flag_send_update = false;
       if (SLF3X_0_present) {
         Serial.print("SLF3X 0 Error:   ");
@@ -299,6 +295,8 @@ void loop() {
         Serial.println(SLF3X_to_celsius(SLF3X_0_readings[SLF3X_TEMP_IDX]));
         Serial.print("Flags:       ");
         Serial.println(SLF3X_0_readings[SLF3X_FLAG_IDX], BIN);
+        Serial.print("Volume (mL): ");
+        Serial.println(SLF3X_0_volume_mL);
       }
       if (SLF3X_1_present) {
         Serial.print("SLF3X 1 Error:   ");
@@ -367,9 +365,9 @@ void loop() {
     // account for dead zone
     setpoint = max(0, setpoint - analog_deadzone);
 
-    // if we don't have manual control enabled OR if we are in the deadzone OR manual control is not enabled, set power to 0
-    if (!manual_control_enable || setpoint == 0 || !manual_control_enabled_by_software) {
-      disable_pid();
+    // if we don't have manual control enabled OR manual control is not enabled, set power to 0
+    if (!manual_control_enable || !manual_control_enabled_by_software) {
+      pid_mode = IDLE_LOOP;
       TTP_set_target(UART_TTP, 0);
 
       // reset the valves if manual ctrl not enabled
@@ -379,7 +377,7 @@ void loop() {
     }
     // Do error handling - don't let liquid past the other bubble sensor
     else if (mode_pressure_vacuum && !OPX350_read(OCB350_1_LOGIC)) {
-      disable_pid();
+      pid_mode = IDLE_LOOP;
       TTP_set_target(UART_TTP, 0);
       reset_valves();
     }
@@ -397,10 +395,9 @@ void loop() {
             break;
           case FLOWRATE_LOOP:
             // convert potentiometer setpoint to a flow value
-            pid_setpoint = abs(setpoint * MANUAL_MAX_FLOW_VAC / ANALOG_MAX);
+            pid_setpoint = -abs(setpoint * MANUAL_MAX_FLOW_VAC / ANALOG_MAX);
             break;
         }
-
       }
       else {
         set_valves_pressure();
@@ -416,7 +413,7 @@ void loop() {
       }
     }
   }
-  // Run the state machine
+  // Run the state machine - define
   switch (internal_program) {
     case INTERNAL_PROGRAM_IDLE:
       break;
@@ -434,6 +431,8 @@ void loop() {
       delay(50);
       digitalWrite(pin_valve_4, HIGH);
       delay(50);
+      digitalWrite(pin_valve_5, HIGH);
+      delay(50);
       digitalWrite(pin_valve_0, LOW);
       delay(50);
       digitalWrite(pin_valve_1, LOW);
@@ -444,6 +443,7 @@ void loop() {
       delay(50);
       digitalWrite(pin_valve_4, LOW);
       delay(50);
+      digitalWrite(pin_valve_5, LOW);
 
       // Test pressure
       digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
@@ -468,31 +468,72 @@ void loop() {
       Serial.print(millis() - time_0);
       Serial.println(" ms");
 
+      // Clear the lines
+      Serial.println("Clearing lines");
+      set_valves_pressure();
+      TTP_set_target(UART_TTP, TTP_MAX_PWR);
+      delay(5000);
+      TTP_set_target(UART_TTP, 0);
+      reset_valves();
+
       // Initialize timed interrupts
       // When they trigger, set a flag to indicate something should be done the next loop cycle
       Timer_send_update_input.begin(set_send_update_flag, SEND_UPDATE_INTERVAL_US);
       Timer_check_manual_input.begin(set_check_manual_input_flag, CHECK_MANUAL_INTERVAL_US);
+      //      internal_program = INTERNAL_PROGRAM_IDLE;
+      //      manual_control_enabled_by_software = true;
+      internal_program = INTERNAL_PROGRAM_LOAD_RESERVIOR_START;
+      break;
+    case INTERNAL_PROGRAM_LOAD_RESERVIOR_START:
+      // Fill the reservior with a set volume of fluid - initialization
+      // Set the valves
+      // valve 5: vent vacuum bottle 0 for a duration
+      release_vacuum_vb0();
+      set_valves_vacuum();
 
-      manual_control_enabled_by_software = true;
-      internal_program = INTERNAL_PROGRAM_IDLE;
+      // Clear volume integration + timing variables
+      SLF3X_0_volume_mL  = 0;
+      SLF3X_0_dt  = millis();
+      // turn on pump to maximum
+      TTP_set_target(UART_TTP, TTP_MAX_PWR);
+
+      // Start monitoring the fluids
+      internal_program = INTERNAL_PROGRAM_LOAD_RESERVIOR;
       break;
-    case INTERNAL_PROGRAM_REMOVE_MEDIUM:
-      //      aaa;
-      break;
-    case INTERNAL_PROGRAM_RAMP_UP_PRESSURE:
-      //      asklfjsdkajlfsd;
-      break;
-    case INTERNAL_PROGRAM_PUMP_FLUID:
-      //      kajsfdlka;
-      break;
-    case INTERNAL_PROGRAM_EMPTY_FLUIDIC_LINE:
-      //      aklfsdjfsd;
+    case INTERNAL_PROGRAM_LOAD_RESERVIOR:
+      // Stay in this state until we measure sufficient fluid or we hit the limit
+      SLF3X_0_volume_mL += (millis() - SLF3X_0_dt) * SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]) / 60.0;
+      SLF3X_0_dt  = millis();
+
+      // Check if we hit the bubble sensor - turn off pumps and set valves if we did
+      if (!OPX350_read(OCB350_1_LOGIC)) {
+        // Set the valves
+        // valve 0: connect to air - prevent backflow
+        digitalWrite(pin_valve_0, HIGH);
+        // valve 1: disconnect from vacuum bottle
+        digitalWrite(pin_valve_1, LOW);
+        // valve 2: stay connected to fluids
+        digitalWrite(pin_valve_2, HIGH);
+        // valve 3: connect to vacuum bottle
+        digitalWrite(pin_valve_3, LOW);
+        // valve 4: disconnect vacuum bottle from pump
+        digitalWrite(pin_valve_4, LOW);
+
+        // Turn off pump
+        TTP_set_target(UART_TTP, 0);
+
+        Serial.println("FLAG - HIT BUBBLE SENSOR");
+
+        internal_program = INTERNAL_PROGRAM_IDLE;
+        manual_control_enabled_by_software = true;
+      }
+
       break;
     case INTERNAL_PROGRAM_PREUSE_CHECK_PRESSURE:
-      //      klasdjf;
+      pressure = check_pressure();
       break;
     case INTERNAL_PROGRAM_PREUSE_CHECK_VACUUM:
-      //      ajfdld;
+      pressure = check_vacuum();
       break;
     default:
       break;
@@ -509,15 +550,6 @@ void set_send_update_flag() {
 }
 void set_check_manual_input_flag() {
   flag_check_manual_inputs = true;
-  return;
-}
-
-
-void disable_pid() {
-  // Clear integral error and disable the loop
-  pid_mode = IDLE_LOOP;
-  pid_i_error = 0;
-  pid_setpoint = 0;
   return;
 }
 
@@ -654,4 +686,28 @@ void set_valves_suction() {
   // connect to disc pump suction
   digitalWrite(pin_valve_4, HIGH);
   return;
+}
+// release vacuum in VB0
+void release_vacuum_vb0() {
+  int16_t  SSCX_readings[2];
+  float psi;
+  TTP_set_target(UART_TTP, 0);
+
+  digitalWrite(pin_valve_4, HIGH);
+  digitalWrite(pin_valve_3, LOW);
+  delay(30);
+  SSCX_read(W_SSCX, SSCX_readings);
+  psi = SSCX_to_psi(SSCX_readings[SSCX_PRESS_IDX]);
+  // open the valve
+  digitalWrite(pin_valve_5, HIGH);
+  // wait for pressure to equalize
+  do {
+    SSCX_read(W_SSCX, SSCX_readings);
+    psi = SSCX_to_psi(SSCX_readings[SSCX_PRESS_IDX]);
+    delay(30);
+  }  while (psi < VB0_PRESSURE_THRESH);
+  // close the valve
+  digitalWrite(pin_valve_5, LOW);
+  digitalWrite(pin_valve_4, LOW);
+  digitalWrite(pin_valve_3, LOW);
 }

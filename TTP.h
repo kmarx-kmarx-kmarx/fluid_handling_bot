@@ -35,7 +35,7 @@
 #define TTP_PUMP_DISABLE     0
 
 #define TTP_MIN_PWR          0
-#define TTP_MAX_PWR       1400
+#define TTP_MAX_PWR       1000
 
 #define TTP_BAUDRATE        115200 // disc pump baud rate
 #define TTP_BUFFER_SIZE         32 // 32 byte read/write buffer

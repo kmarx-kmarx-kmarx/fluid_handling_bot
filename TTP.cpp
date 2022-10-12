@@ -74,7 +74,6 @@ bool TTP_send_packet(HardwareSerial &S, char *tx_buffer, char *rx_buffer) {
       delayMicroseconds(TTP_IDLETIME_uS);
     }
     // wait for a response
-//    delay(200);
     // if we have a response, process it. otherwise, fall through to the next for loop
     if (S.available()) {
       // read every byte into the buffer
@@ -386,6 +385,7 @@ bool TTP_set_pwr_limit(HardwareSerial &S, int16_t pwr_lim) {
 */
 bool TTP_set_target(HardwareSerial &S, float target) {
   target = constrain(target, TTP_MIN_PWR, TTP_MAX_PWR);
+  Serial.println(target);
   return TTP_write_register(S, TTP_SET_VALUE, target);
 }
 

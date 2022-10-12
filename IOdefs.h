@@ -13,10 +13,12 @@
 // Valve pins
 //   Valves are 0-indexed starting at the disc pump output and indexing clockwise through the fluid loop  
 #define pin_valve_0 4 // Pneumatic valve. Right after the disc pump. High: Vent air out. Low: push air to valve 1
-#define pin_valve_1 5 // Media isolation valve. High: connect pump to reservior (push air into reservior) Low: connect reservior to vacuum bottle
+#define pin_valve_1 5 // Media isolation valve. High: connect pump to reservior (push air into reservior) Low: connect reservior to valve 5
 #define pin_valve_2 6 // Media isolation valve. High: Connect reservior to flow cell Low: connect reservior to rotary valve
-#define pin_valve_3 7 // Pneumatic valve. High: Connect flow cell's vacuum bottle to the next valve Low: connect reservior's vacuum bottle to the next valve
+#define pin_valve_3 7 // Pneumatic valve. High: Connect flow cell's vacuum bottle (VB 1) to the next valve Low: connect reservior's vacuum bottle (VB 0) to the next valve
 #define pin_valve_4 8 // Pneumatic valve. High: Connect previous valve to the disc pump Low: connect ambient air to disc pump
+#define pin_valve_5 9 // Media isolation valve. High: vent air into Vacuum Bottle 0 Low: Connect VB1 to the fluid reservior
+
 
 // comms to the 33996
 #define pin_33996_CS_0 10
