@@ -6,7 +6,7 @@
       Arguments: TwoWire &W, int16_t *readings
     float SSCX_to_celsius: Convert from raw to degrees Celsius
       Arguments: int16_t raw_temp
-    float SSCX_to_uLmin: Convert from raw to pounds per square inch
+    float SSCX_to_psi: Convert from raw to pounds per square inch
       Arguments: int16_t raw_press
 */
 #include "SSCX.h"

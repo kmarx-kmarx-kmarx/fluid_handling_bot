@@ -20,6 +20,14 @@
         volatile bool flag_read_sensors - indicates the sensors should be read during the next loop
         volatile bool flag_send_update  - indicates debug data should be sent during the next loop
 
+        byte    INTERNAL_PROGRAM       - state machine's current state
+        uint8_t pid_mode               - PID mode (flow control, pressure control, off)
+        int8_t  sign                   - indicates whether increasing pump power makes the measurement more positive or more negative depending on valves
+        float   pid_setpoint           - target value (flow or pressure)
+
+        float   SLF3X_0_volume_mL      - total fluid measured
+        int32_t SLF3X_0_dt             - time between flowrate measurements
+
     Dependencies:
         SLF3X.h     : Functions for initializing and reading from the flow sensor
         SSCX.h      : Functions for initializing and reading from the pressure sensor
@@ -43,22 +51,23 @@
 #include "IOdefs.h"
 #include "States.h"
 
-elapsedMillis elapsed_millis_since_the_start_of_the_internal_program = 0;
 byte internal_program = INTERNAL_PROGRAM_INITIAL;
 
 // PID control parameters and variables
 // Mode and setpoint persist over loops
 uint8_t pid_mode = IDLE_LOOP;
+int8_t  pid_sign = 0;
 float pid_setpoint = 0;
 
-// Store volumes
+// pressure to initially get fluid at flow sensor
+#define PSI_LOAD_FLUID -0.3
 
 // Manual control params
 #define analog_deadzone 23           // ignore analog values below the dead zone
 #define ANALOG_MAX      1023
 #define MANUAL_PWR_MAX  TTP_PWR_LIM_mW
 #define MANUAL_MAX_FLOW_VAC   300.0     // max flow achievable when vacuum (uL/min)
-#define MANUAL_MIN_FLOW_PRES -100.0     // minimum flow achievable when pressure (uL/min)
+#define MANUAL_MIN_FLOW_PRES -200.0     // minimum flow achievable when pressure (uL/min)
 #define MANUAL_DEFAULT_MODE FLOWRATE_LOOP // default to flowrate loop
 
 // Vacuum bottle pressure release threshold
@@ -281,10 +290,10 @@ void loop() {
     // Initialize shared variables
     float    disc_pump_power = 0;
     float    measurement = 0;
-    pid_loop(UART_TTP, pid_mode, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]), pid_setpoint, measurement, disc_pump_power);
+    pid_loop(UART_TTP, pid_mode, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]), SSCX_to_psi(SSCX_0_readings[SSCX_PRESS_IDX]), pid_sign, pid_setpoint, measurement, disc_pump_power);
 
     // Send an update only if the reading has been done
-    if (flag_send_update && false) {
+    if (flag_send_update) {
       flag_send_update = false;
       if (SLF3X_0_present) {
         Serial.print("SLF3X 0 Error:   ");
@@ -335,7 +344,7 @@ void loop() {
       //     Print PID info
       Serial.print("PID: ");
       switch (pid_mode) {
-        case PRESSURE_LOOP:
+        case VACUUM_LOOP:
           Serial.println("Pressure Mode");
           break;
         case FLOWRATE_LOOP:
@@ -390,12 +399,13 @@ void loop() {
         set_valves_vacuum();
         // handle PID cases
         switch (pid_mode) {
-          case PRESSURE_LOOP:
+          case VACUUM_LOOP:
             // TODO
             break;
           case FLOWRATE_LOOP:
             // convert potentiometer setpoint to a flow value
-            pid_setpoint = -abs(setpoint * MANUAL_MAX_FLOW_VAC / ANALOG_MAX);
+            pid_setpoint = -abs(setpoint * MANUAL_MAX_FLOW_VAC / (ANALOG_MAX - analog_deadzone));
+            pid_sign = -1;
             break;
         }
       }
@@ -403,11 +413,12 @@ void loop() {
         set_valves_pressure();
         // handle PID cases
         switch (pid_mode) {
-          case PRESSURE_LOOP:
+          case VACUUM_LOOP:
             // TODO
             break;
           case FLOWRATE_LOOP:
-            pid_setpoint = abs(setpoint * MANUAL_MIN_FLOW_PRES / ANALOG_MAX);
+            pid_setpoint = abs(setpoint * MANUAL_MIN_FLOW_PRES / (ANALOG_MAX - analog_deadzone));
+            pid_sign = 1;
             break;
         }
       }
@@ -416,6 +427,8 @@ void loop() {
   // Run the state machine - define
   switch (internal_program) {
     case INTERNAL_PROGRAM_IDLE:
+      SLF3X_0_volume_mL += (millis() - SLF3X_0_dt) * SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]) / (60.0 * 1000.0 * 1000.0);
+      SLF3X_0_dt  = millis();
       break;
     case INTERNAL_PROGRAM_INITIAL:
       Serial.println("Starting demo program");
@@ -491,18 +504,44 @@ void loop() {
       release_vacuum_vb0();
       set_valves_vacuum();
 
-      // Clear volume integration + timing variables
-      SLF3X_0_volume_mL  = 0;
-      SLF3X_0_dt  = millis();
-      // turn on pump to maximum
-      TTP_set_target(UART_TTP, TTP_MAX_PWR);
+      // start pumping at low PSI until we hit the first bubble sensor
+      pid_mode = VACUUM_LOOP;
+      pid_setpoint = PSI_LOAD_FLUID;
+      pid_sign = -1;
+      internal_program = INTENRAL_PROGRAM_LOAD_FLOW;
+      break;
+    case INTENRAL_PROGRAM_LOAD_FLOW:
+      // Wait until we hit the bubble sensor
+      // Once we hit it, stop fluid flow and vent the vacuum bottle
+      if (!OPX350_read(OCB350_0_LOGIC)) {
+        // disable PID
+        pid_mode = IDLE_LOOP;
+        TTP_set_target(UART_TTP, 0);
+        // prevent fluid flow through valves
+        digitalWrite(pin_valve_0, HIGH);
+        digitalWrite(pin_valve_1, LOW);
+        digitalWrite(pin_valve_2, HIGH);
+        // pins 3-5 set by venting function
+        release_vacuum_vb0();
+        // Return to vacuum state
+        set_valves_vacuum();
+        // Clear volume integration + timing variables
+        SLF3X_0_volume_mL  = 0;
+        SLF3X_0_dt  = millis();
 
-      // Start monitoring the fluids
-      internal_program = INTERNAL_PROGRAM_LOAD_RESERVIOR;
+        // Go to next state
+        internal_program = INTERNAL_PROGRAM_LOAD_RESERVIOR;
+        //        internal_program = INTERNAL_PROGRAM_IDLE;
+        //        manual_control_enabled_by_software = true;
+      }
       break;
     case INTERNAL_PROGRAM_LOAD_RESERVIOR:
+      // Start flow control
+      pid_mode = FLOWRATE_LOOP;
+      pid_sign = -1;
+      pid_setpoint = -100.0; // example
       // Stay in this state until we measure sufficient fluid or we hit the limit
-      SLF3X_0_volume_mL += (millis() - SLF3X_0_dt) * SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]) / 60.0;
+      SLF3X_0_volume_mL += (millis() - SLF3X_0_dt) * SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]) / (60.0 * 1000.0 * 1000.0);
       SLF3X_0_dt  = millis();
 
       // Check if we hit the bubble sensor - turn off pumps and set valves if we did
@@ -525,6 +564,9 @@ void loop() {
         Serial.println("FLAG - HIT BUBBLE SENSOR");
 
         internal_program = INTERNAL_PROGRAM_IDLE;
+        pid_mode = IDLE_LOOP;
+        pid_setpoint = 0;
+        TTP_set_target(UART_TTP, 0);
         manual_control_enabled_by_software = true;
       }
 
