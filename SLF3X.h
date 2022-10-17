@@ -31,6 +31,9 @@
 #define SLF3X_TEMP_IDX      1
 #define SLF3X_FLAG_IDX      2
 
+#define SLF3X_NO_FLUID      (1<<0) // flag indicating no fluid in the sensor
+#define SLF3X_HI_FLOW       (1<<1) // flag indicating the flowrate is too high
+
 #define SLF3X_N_TRIES 10
 
 // Function headers

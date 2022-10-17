@@ -60,7 +60,14 @@ int8_t  pid_sign = 0;
 float pid_setpoint = 0;
 
 // pressure to initially get fluid at flow sensor
-#define PSI_LOAD_FLUID -0.3
+#define PSI_LOAD_FLUID -0.4
+// flowrate for loading fluid
+#define FLOW_LOAD_FLUID -100.0
+// volume target
+#define FLUID_LOAD_TARGET_uL 0.30
+#define FLUID_LOAD_BUFFER_uL 0.05
+// flowrate for unloading fluid
+#define FLOW_UNLOAD_FLUID 100.0
 
 // Manual control params
 #define analog_deadzone 23           // ignore analog values below the dead zone
@@ -361,6 +368,11 @@ void loop() {
       Serial.println(disc_pump_power);
       Serial.println(millis());
     }
+//    Serial.print(pid_setpoint);
+//    Serial.print(", ");
+//    Serial.print(measurement);
+//    Serial.print(", ");
+//    Serial.println(disc_pump_power);
   }
 
   // Read the manual inputs
@@ -539,37 +551,65 @@ void loop() {
       // Start flow control
       pid_mode = FLOWRATE_LOOP;
       pid_sign = -1;
-      pid_setpoint = -100.0; // example
+      pid_setpoint = FLOW_LOAD_FLUID;
       // Stay in this state until we measure sufficient fluid or we hit the limit
       SLF3X_0_volume_mL += (millis() - SLF3X_0_dt) * SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]) / (60.0 * 1000.0 * 1000.0);
       SLF3X_0_dt  = millis();
 
       // Check if we hit the bubble sensor - turn off pumps and set valves if we did
       if (!OPX350_read(OCB350_1_LOGIC)) {
-        // Set the valves
-        // valve 0: connect to air - prevent backflow
-        digitalWrite(pin_valve_0, HIGH);
-        // valve 1: disconnect from vacuum bottle
-        digitalWrite(pin_valve_1, LOW);
-        // valve 2: stay connected to fluids
-        digitalWrite(pin_valve_2, HIGH);
-        // valve 3: connect to vacuum bottle
-        digitalWrite(pin_valve_3, LOW);
-        // valve 4: disconnect vacuum bottle from pump
-        digitalWrite(pin_valve_4, LOW);
-
+        Serial.println("FLAG - HIT BUBBLE SENSOR");
+        stop_current_enable_manual();
+      }
+      else if ( abs(SLF3X_0_volume_mL) > (FLUID_LOAD_TARGET_uL + FLUID_LOAD_BUFFER_uL)) {
+        // If we have enough fluid, set valves and go to the next state - unload fluid into chamber.
         // Turn off pump
         TTP_set_target(UART_TTP, 0);
+        set_valves_pressure();
+        // reset the PID loop
+        pid_reset();
+        // positive flowrate loop params
+        pid_sign = 1;
+        pid_mode = FLOWRATE_LOOP;
+        pid_setpoint = 0;
 
-        Serial.println("FLAG - HIT BUBBLE SENSOR");
+        // next state: unload fluid into chamber
+        internal_program = INTERNAL_PROGRAM_UNLOAD;
+        // reset fluid unloading to 0
+        SLF3X_0_volume_mL = 0;
+      }
+      break;
+    case INTERNAL_PROGRAM_UNLOAD:
+      // Start flow control
+      pid_mode = FLOWRATE_LOOP;
+      pid_sign = 1;
+      pid_setpoint = FLOW_UNLOAD_FLUID;
+      // Stay in this state until we measure sufficient fluid or we run out of fluid
+      SLF3X_0_volume_mL += (millis() - SLF3X_0_dt) * SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]) / (60.0 * 1000.0 * 1000.0);
+      SLF3X_0_dt  = millis();
 
-        internal_program = INTERNAL_PROGRAM_IDLE;
+      // Check if there is fluid in the flow sensor - if not, leave this state.
+      if (SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) {
+        stop_current_enable_manual();
+        Serial.println("FLAG - NO AIR IN FLOW");
+      }
+      // If there is fluid in the sensor and we hit our volume target, deposit everything and restart the loop
+      else if(abs(SLF3X_0_volume_mL) > FLUID_LOAD_TARGET_uL){
+        // suck in air to clear the reservoir - manually move the inlet
+        set_valves_vacuum();
+        TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
+        Serial.println("Move inlet to air - clear reservoir");
+        delay(5000);
+        // vacuum away fluid remaining in the reservior
+        set_valves_pressure();
+        TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
+        Serial.println("Depositing fluid");
+        delay(5000);
         pid_mode = IDLE_LOOP;
         pid_setpoint = 0;
-        TTP_set_target(UART_TTP, 0);
-        manual_control_enabled_by_software = true;
+        pid_reset();
+        internal_program = INTERNAL_PROGRAM_LOAD_RESERVIOR_START;
       }
-
       break;
     case INTERNAL_PROGRAM_PREUSE_CHECK_PRESSURE:
       pressure = check_pressure();
@@ -746,10 +786,38 @@ void release_vacuum_vb0() {
   do {
     SSCX_read(W_SSCX, SSCX_readings);
     psi = SSCX_to_psi(SSCX_readings[SSCX_PRESS_IDX]);
+    Serial.println(psi);
     delay(30);
   }  while (psi < VB0_PRESSURE_THRESH);
   // close the valve
   digitalWrite(pin_valve_5, LOW);
   digitalWrite(pin_valve_4, LOW);
   digitalWrite(pin_valve_3, LOW);
+  
+  return;
+}
+
+void stop_current_enable_manual() {
+  // Set the valves
+  // valve 0: connect to air - prevent backflow
+  digitalWrite(pin_valve_0, HIGH);
+  // valve 1: disconnect from vacuum bottle
+  digitalWrite(pin_valve_1, LOW);
+  // valve 2: stay connected to fluids
+  digitalWrite(pin_valve_2, HIGH);
+  // valve 3: connect to vacuum bottle
+  digitalWrite(pin_valve_3, LOW);
+  // valve 4: disconnect vacuum bottle from pump
+  digitalWrite(pin_valve_4, LOW);
+
+  // Turn off pump
+  TTP_set_target(UART_TTP, 0);
+
+  internal_program = INTERNAL_PROGRAM_IDLE;
+  pid_reset();
+  pid_mode = IDLE_LOOP;
+  pid_setpoint = 0;
+  TTP_set_target(UART_TTP, 0);
+  manual_control_enabled_by_software = true;
+  return;
 }

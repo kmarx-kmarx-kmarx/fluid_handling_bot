@@ -26,21 +26,21 @@
 
 // Store PID parameters - can be modified later
 // positive pressure PID params:
-float pres_pos_p = 1;
-float pres_pos_i = 1;
-float pres_pos_d = 1;
+float pres_pos_p = 0;
+float pres_pos_i = 0;
+float pres_pos_d = 0;
 // negative pressure PID params:
-float pres_neg_p = 1;
-float pres_neg_i = 1;
-float pres_neg_d = 1;
+float pres_neg_p = 0.5;
+float pres_neg_i = .005;
+float pres_neg_d = .25;
 // positive flowrate PID params:
-float flow_pos_p = 1;
-float flow_pos_i = 1;
-float flow_pos_d = 1;
+float flow_pos_p = 0.06;
+float flow_pos_i = 0.0004;
+float flow_pos_d = 240;
 // negative flowrate PID params:
-float flow_neg_p = 1;
-float flow_neg_i = 1;
-float flow_neg_d = 1;
+float flow_neg_p = 0.1;
+float flow_neg_i = 0.05;
+float flow_neg_d = 8;
 
 // Store error terms
 float pid_i_error = 0;
