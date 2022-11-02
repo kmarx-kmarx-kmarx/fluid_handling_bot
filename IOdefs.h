@@ -1,7 +1,13 @@
+#ifndef _IODEFS_H_
+#define _IODEFS_H_
+
 // pin defs
 #define pin_manual_control_enable 24 // manual ctrl enable button
 #define pin_pressure_vacuum 25       // pressure/vacuum selector switch
 #define pin_analog_in A12            // potentiometer setpoint
+// analog control defs
+#define analog_deadzone 23           // ignore analog values below the dead zone
+#define ANALOG_MAX      1023
 
 // indicator lights
 #define pin_LED_error 23
@@ -20,7 +26,10 @@
 #define pin_valve_5 9 // Media isolation valve. High: vent air into Vacuum Bottle 0 Low: Connect VB1 to the fluid reservior
 
 
-// comms to the 33996
-#define pin_33996_CS_0 10
-#define pin_33996_PWM 41
-#define pin_33996_nRST 40
+// I2C bus select
+#define PIN_SENSOR_SELECT 15
+#define SELECT_SENSOR_0   LOW
+#define SELECT_SENSOR_1   HIGH
+
+
+#endif /* _IODEFS_H_ */

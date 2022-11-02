@@ -48,8 +48,10 @@ float pid_prev_error = 0;
 // store elapsed time
 int16_t dt = 0;
 
-/*
-  -----------------------------------------------------------------------------
+// bang-bang param
+float prev_power = 0;
+
+/*  -----------------------------------------------------------------------------
   DESCRIPTION: pid_loop() runs position-integral control over either pressure or flowrate.
 
   OPERATION:   We first assume the valves are set properly to achieve the setpoint (e.g. no blockages, fluid flowing in the correct direction)
@@ -94,68 +96,83 @@ int16_t dt = 0;
   -----------------------------------------------------------------------------
 */
 void pid_loop(HardwareSerial &S, uint8_t mode, float flow_reading, float vacuum_reading, float pressure_reading, int8_t sign, float setpoint, float &measurement, float &disc_pump_power) {
-  float error; // difference between setpoint and measurement
-  float pid_p_coeff;
-  float pid_i_coeff;
-  float pid_d_coeff;
-
-  switch (mode) {
-    // set parameters
-    case VACUUM_LOOP:
-      measurement = vacuum_reading;
-      error = setpoint - measurement;
-      // if we want negative pressure, invert the error (assuming the valves were set properly, more disc pump power -> more negative pressure)
-      // we need different PID parameters in this case
-      if (sign < 0) {
-        error = -error;
-        pid_p_coeff = pres_neg_p;
-        pid_i_coeff = pres_neg_i;
-        pid_d_coeff = pres_neg_d;
-      }
-      else {
-        pid_p_coeff = pres_pos_p;
-        pid_i_coeff = pres_pos_i;
-        pid_d_coeff = pres_pos_d;
-      }
-      break;
-    // handle flowrate loop case
-    case FLOWRATE_LOOP:
-      measurement = flow_reading;
-      error = (setpoint - measurement) / 1000; // scale error to account for large flowrates in units uL/min
-      // if we want negative flowrate, invert the error (assuming the valves were set properly, more disc pump power -> more negative flowrate)
-      // we need different PID parameters in this case
-      if (sign < 0) {
-        error = -error;
-        pid_p_coeff = flow_neg_p;
-        pid_i_coeff = flow_neg_i;
-        pid_d_coeff = flow_neg_d;
-      }
-      else {
-        pid_p_coeff = flow_pos_p;
-        pid_i_coeff = flow_pos_i;
-        pid_d_coeff = flow_pos_d;
-      }
-      break;
-    // handle default/IDLE_LOOP case
-    default:
-      pid_reset();
-      pid_p_coeff = 0;
-      pid_i_coeff = 0;
-      pid_d_coeff = 0;
-      error = 0;
-      break;
+  // bang-bang implementation - placeholder while debugging pid
+  // we only care about managing flowrate - prevent the flow sensor from saturating
+  measurement = flow_reading * sign;
+  if (measurement > UPPER_FLOW_THRESH) {
+    disc_pump_power = TTP_MIN_PWR;
   }
-  // perform the PID loop
-  // add integral error
-  pid_i_error += error;
-  // integral wind-up limit
-  pid_i_error = constrain(pid_i_error, 0, (1 / pid_i_coeff));
-  // weighted sum of error coefficients scaled by max power
-  disc_pump_power = ((pid_i_error * pid_i_coeff + error * pid_p_coeff + pid_d_coeff * (error - pid_prev_error) / (millis() - dt))) * TTP_MAX_PWR;
-  // current err is now prev err
-  pid_prev_error = error;
-  // store time of previous loop
-  dt = millis();
+  else if (measurement < LOWER_FLOW_THRESH) {
+    disc_pump_power = TTP_MAX_PWR/10;
+  }
+  else {
+    disc_pump_power = prev_power;
+  }
+  prev_power = disc_pump_power;
+
+
+  //  float error; // difference between setpoint and measurement
+  //  float pid_p_coeff;
+  //  float pid_i_coeff;
+  //  float pid_d_coeff;
+  //
+  //  switch (mode) {
+  //    // set parameters
+  //    case VACUUM_LOOP:
+  //      measurement = vacuum_reading;
+  //      error = setpoint - measurement;
+  //      // if we want negative pressure, invert the error (assuming the valves were set properly, more disc pump power -> more negative pressure)
+  //      // we need different PID parameters in this case
+  //      if (sign < 0) {
+  //        error = -error;
+  //        pid_p_coeff = pres_neg_p;
+  //        pid_i_coeff = pres_neg_i;
+  //        pid_d_coeff = pres_neg_d;
+  //      }
+  //      else {
+  //        pid_p_coeff = pres_pos_p;
+  //        pid_i_coeff = pres_pos_i;
+  //        pid_d_coeff = pres_pos_d;
+  //      }
+  //      break;
+  //    // handle flowrate loop case
+  //    case FLOWRATE_LOOP:
+  //      measurement = flow_reading;
+  //      error = (setpoint - measurement) / 1000; // scale error to account for large flowrates in units uL/min
+  //      // if we want negative flowrate, invert the error (assuming the valves were set properly, more disc pump power -> more negative flowrate)
+  //      // we need different PID parameters in this case
+  //      if (sign < 0) {
+  //        error = -error;
+  //        pid_p_coeff = flow_neg_p;
+  //        pid_i_coeff = flow_neg_i;
+  //        pid_d_coeff = flow_neg_d;
+  //      }
+  //      else {
+  //        pid_p_coeff = flow_pos_p;
+  //        pid_i_coeff = flow_pos_i;
+  //        pid_d_coeff = flow_pos_d;
+  //      }
+  //      break;
+  //    // handle default/IDLE_LOOP case
+  //    default:
+  //      pid_reset();
+  //      pid_p_coeff = 0;
+  //      pid_i_coeff = 0;
+  //      pid_d_coeff = 0;
+  //      error = 0;
+  //      break;
+  //  }
+  //  // perform the PID loop
+  //  // add integral error
+  //  pid_i_error += error;
+  //  // integral wind-up limit
+  //  pid_i_error = constrain(pid_i_error, 0, (1 / pid_i_coeff));
+  //  // weighted sum of error coefficients scaled by max power
+  //  disc_pump_power = ((pid_i_error * pid_i_coeff + error * pid_p_coeff + pid_d_coeff * (error - pid_prev_error) / (millis() - dt))) * TTP_MAX_PWR;
+  //  // current err is now prev err
+  //  pid_prev_error = error;
+  //  // store time of previous loop
+  //  dt = millis();
   // limit power
   disc_pump_power = constrain(disc_pump_power, TTP_MIN_PWR, TTP_MAX_PWR);
   // set disc pump power
