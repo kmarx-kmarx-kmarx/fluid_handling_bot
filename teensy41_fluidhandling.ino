@@ -1,4 +1,5 @@
 /*
+ * notes - for the OPX350 - use both outputs to detect bubbles and fluid; just using one is insufficient
     teensy41_fluidhandling.ino:
         This project will incrementally implement features necessary for the Prakash Lab's new fluid handling robot.
 
@@ -24,6 +25,7 @@
       Command Management:
         uint8_t  command_execution_status  - indicates the progress of a command. See SerialCommUtils.h for more information
         uint8_t  internal_program          - indicates state of internal state machine. See States.h
+        uint8_t  internal_next             - indicates what the next state should be.
         float    vol_load_uL               - volume target
         uint16_t t0                        - used to track global elapsed time
         bool    manual_control_enabled_by_software - set true when manual control is available
@@ -126,6 +128,7 @@ volatile bool manual_control_enabled_by_software = false;
 // command management
 uint8_t  command_execution_status = 0;
 uint8_t  internal_program = INTERNAL_PROGRAM_INITIAL;
+uint8_t  internal_next = INTERNAL_PROGRAM_IDLE;
 float    vol_load_uL = 0;      // volume target
 uint16_t cmd_time = 0;         // timing variable
 
@@ -629,7 +632,7 @@ void loop() {
         }
         stop_current_enable_manual();
       }
-      else if ( abs(SLF3X_0_volume_mL) > (vol_load_uL + FLUID_LOAD_BUFFER_uL) / 1000.0) {
+      else if ( abs(SLF3X_0_volume_mL) > ((vol_load_uL + FLUID_LOAD_BUFFER_uL) / 1000.0)) {
         // If we have enough fluid, set valves and go to the next state - unload fluid into chamber.
         // Turn off pump
         TTP_set_target(UART_TTP, 0);
@@ -642,28 +645,48 @@ void loop() {
         pid_setpoint = 0;
 
         // next state: unload fluid into chamber
-        internal_program = INTERNAL_PROGRAM_UNLOAD_START;
+        if (DEMO_MODE) {
+          internal_program = INTERNAL_PROGRAM_UNLOAD_START;
+        }
+        else {
+          internal_program = INTERNAL_PROGRAM_IDLE;
+          manual_control_enabled_by_software = true;
+        }
         // reset fluid unloading to 0
         SLF3X_0_volume_mL = 0;
-        //        internal_program = INTERNAL_PROGRAM_IDLE;
-        //        manual_control_enabled_by_software = true;
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
       }
       break;
 
     case INTERNAL_PROGRAM_CLEAR_LINES_START:
-      set_valves_vacuum();
       TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
       cmd_time = millis() + op_time_ms;
       internal_program = INTERNAL_PROGRAM_CLEAR_LINES;
       break;
     case INTERNAL_PROGRAM_CLEAR_LINES:
-      if (millis() > cmd_time) {
+      // if we detect fluid in the lines (i.e. no bubbles in either line), reset the timer
+      if (!OPX350_read(OCB350_1_LOGIC) || !OPX350_read(OCB350_0_LOGIC)) {
+        internal_program = INTERNAL_PROGRAM_CLEAR_LINES_START;
+        if (DEBUG_WITH_SERIAL) {
+          Serial.println("Fluid still present!");
+        }
+      }
+      // otherwise, if we don't detect fluid, we succeeded!
+      // go to the next state
+      else if (millis() > cmd_time) {
         TTP_set_target(UART_TTP, 0);
         reset_valves();
-        internal_program = INTERNAL_PROGRAM_IDLE;
-        manual_control_enabled_by_software = true;
-        command_execution_status = COMPLETED_WITHOUT_ERRORS;
+        // if we are idling next, we have completed the command
+        if (internal_next == INTERNAL_PROGRAM_IDLE) {
+          internal_program = INTERNAL_PROGRAM_IDLE;
+          manual_control_enabled_by_software = true;
+          command_execution_status = COMPLETED_WITHOUT_ERRORS;
+
+        }
+        // if we are going to a different state, we are part of a longer command and it hasn't been completed yet
+        else {
+          internal_program = internal_next;
+        }
       }
       break;
 
@@ -676,31 +699,42 @@ void loop() {
       SLF3X_0_volume_mL = 0;
       SLF3X_0_dt  = millis();
 
-      internal_program = INTERNAL_PROGRAM_UNLOAD;
+      internal_program = INTERNAL_PROGRAM_UNLOAD_0;
       break;
-    case INTERNAL_PROGRAM_UNLOAD:
+    case INTERNAL_PROGRAM_UNLOAD_0:
       // Stay in this state until we measure sufficient fluid or we run out of fluid
       SLF3X_0_volume_mL = vol_inc(SLF3X_0_volume_mL, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), (millis() - SLF3X_0_dt), (SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID));
       SLF3X_0_dt  = millis();
 
       // If there is fluid in the sensor and we hit our volume target, deposit everything and restart the loop
-      if (abs(SLF3X_0_volume_mL) > vol_load_uL / 1000.0) {
+      if (abs(SLF3X_0_volume_mL) > (vol_load_uL / 1000.0)) {
         // suck in air to clear the reservoir - manually move the inlet
         set_valves_vacuum();
-        TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
+        //TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
         if (DEBUG_WITH_SERIAL) {
           Serial.println("Move inlet to air - clear reservoir");
         }
-        delay(10000);
-        // vacuum away fluid remaining in the reservoir
-        set_valves_pressure();
-        TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
-        if (DEBUG_WITH_SERIAL) {
-          Serial.println("Move inlet back to fluid - depositing fluid");
-        }
-        delay(10000);
-        internal_program = INTERNAL_PROGRAM_LOAD_RESERVOIR_START;
+        op_time_ms = LINE_CLEAR_TIME_MS;
+        internal_next = INTERNAL_PROGRAM_UNLOAD_1;
+        internal_program = INTERNAL_PROGRAM_CLEAR_LINES_START;
       }
+      break;
+    case INTERNAL_PROGRAM_UNLOAD_1:
+      // vacuum away fluid remaining in the reservoir
+      set_valves_pressure();
+      TTP_set_target(UART_TTP, TTP_PWR_LIM_mW);
+      if (DEBUG_WITH_SERIAL) {
+        Serial.println("Move inlet back to fluid - depositing fluid");
+      }
+      op_time_ms = LINE_CLEAR_TIME_MS;
+      if (DEMO_MODE) {
+        internal_next = INTERNAL_PROGRAM_LOAD_RESERVOIR_START;
+      }
+      else {
+        internal_next = INTERNAL_PROGRAM_IDLE;
+      }
+      internal_next = INTERNAL_PROGRAM_UNLOAD_1;
+      internal_program = INTERNAL_PROGRAM_CLEAR_LINES_START;
       break;
     case INTERNAL_PROGRAM_PREUSE_CHECK_PRESSURE:
       pressure = check_pressure();
