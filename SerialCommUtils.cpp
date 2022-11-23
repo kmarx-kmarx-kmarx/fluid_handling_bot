@@ -71,30 +71,52 @@ bool read_serial_command(byte payloads[TO_MCU_CMD_LENGTH - 3], uint8_t &cmd) {
   //    }
   //    return false;
   //  }
-  // Start reading in the rest of the command
-  while (Serial.available() > 0 && idx < TO_MCU_CMD_LENGTH) {
-    if (idx < 3) {
-      buffer_rx[idx++] = Serial.read();
+  if (Serial.available()) {
+    // Start reading in the rest of the command
+    while (Serial.available() > 0 && idx < TO_MCU_CMD_LENGTH) {
+      if (idx < 3) {
+        buffer_rx[idx++] = Serial.read();
+      }
+      else {
+        payloads[(idx++ - 3)] = Serial.read();
+      }
     }
-    else {
-      payloads[idx++] = Serial.read();
+
+    current_command_uid = uint16_t(buffer_rx[0]) << 8 + uint16_t(buffer_rx[1]);
+    current_command = buffer_rx[2];
+    cmd = current_command; // copy data into shared variable
+
+    Serial.println("Command RXed");
+    Serial.println(current_command_uid, HEX);
+    Serial.println(current_command, HEX);
+    for (int i = 0; i < (TO_MCU_CMD_LENGTH - 3); i++) {
+      Serial.print(payloads[i], HEX);
+      Serial.print(", ");
     }
+    Serial.println();
+
+    // Handle the CLEAR command
+    if (current_command == CLEAR) {
+      current_command_uid = 0;
+      return false;
+    }
+
+    // Verify we got enough bytes to process the other commands - return if we didn't fill the buffer
+    if (idx < TO_MCU_CMD_LENGTH) {
+      return false;
+    }
+    // payloads are loaded into shared array
+    return true;
   }
-
-  current_command_uid = uint16_t(buffer_rx[0]) * 256 + uint16_t(buffer_rx[1]);
-  current_command = buffer_rx[2];
-  cmd = current_command; // copy data into shared variable
-
-  // Handle the CLEAR command
-  if (current_command == CLEAR) {
-    current_command_uid = 0;
+  else{
+    for(idx = 0; idx < TO_MCU_CMD_LENGTH; idx++) {
+      if (idx < 3) {
+        buffer_rx[idx++] = 0;
+      }
+      else {
+        payloads[idx++] = 0;
+      }
+    }
     return false;
   }
-
-  // Verify we got enough bytes to process the other commands - return if we didn't fill the buffer
-  if (idx < TO_MCU_CMD_LENGTH) {
-    return false;
-  }
-  // payloads are loaded into shared array
-  return true;
 }

@@ -103,7 +103,7 @@ void pid_loop(HardwareSerial &S, uint8_t mode, float flow_reading, float vacuum_
     disc_pump_power = TTP_MIN_PWR;
   }
   else if (measurement < LOWER_FLOW_THRESH) {
-    disc_pump_power = TTP_MAX_PWR/10;
+    disc_pump_power = PUMP_PWR_mW_GO;
   }
   else {
     disc_pump_power = prev_power;

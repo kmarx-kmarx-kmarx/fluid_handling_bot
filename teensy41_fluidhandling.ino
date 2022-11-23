@@ -83,9 +83,9 @@
 
 // SYSTEM PARAMETERS - change these depending on your system configuration
 // operation parameters
-#define DEBUG_WITH_SERIAL true // set true to send debug messages over ASCII instead of bits
+#define DEBUG_WITH_SERIAL true  // set true to send debug messages over ASCII instead of bits
 #define DEMO_MODE         true // if set to true, constantly load and unload DEMO_VOL uL of fluid in a loop
-#define DEMO_VOL           100
+#define DEMO_VOL          200
 // system parameters
 #define VOLUME_UL_MAX            400   // maximum volume that fits in the reservior in units uL
 #define FLUID_LOAD_BUFFER_uL       5   // load an additional small volume of fluid to account for losses when moving fluids
@@ -140,6 +140,11 @@ uint8_t pid_mode = IDLE_LOOP;
 int8_t  pid_sign = 0;
 float pid_setpoint = 0;
 
+// filter parameters
+#define DECAY  0.01
+#define THRESH 10
+float prev_p0 = 0;
+float prev_p1 = 0;
 
 // SLF3X flow sensor parameters
 #define W_SLF3X      Wire1
@@ -280,6 +285,8 @@ void setup() {
   t0 = millis();
 }
 
+uint16_t op_time_ms = 0;       // serial command timestamp
+
 void loop() {
   // Init variables
   int16_t  SLF3X_0_readings[3];  // flowrate, temperature, and flags from the flow sensor
@@ -292,13 +299,21 @@ void loop() {
   uint8_t  SSCX_1_err;
   uint16_t time_0 = millis();    // track current time
   float    pressure;             // pressure setpoint
-  uint16_t op_time_ms = 0;       // serial command timestamp
   byte payloads[TO_MCU_CMD_LENGTH - 3]; // incoming serial payload
   uint32_t payload_data = 0;            // used for parsing the payload data
   uint8_t serial_command;               // which command to run
+  int bubbles_present = 0;
+  float pr0;
+  float pr1;
 
   // first, try reading a command. read_serial_command overwrites payloads[] and serial_command
   if (read_serial_command(payloads, serial_command)) {
+    Serial.println("Valid Command RXed");
+    for(int i = 0; i < (TO_MCU_CMD_LENGTH-3);i++){
+      Serial.print(payloads[i], DEC);
+      Serial.print(", ");
+    }
+    Serial.println();
     // We have a command in progress!
     command_execution_status = IN_PROGRESS;
     switch (serial_command) {
@@ -353,13 +368,20 @@ void loop() {
     digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_1);
     SSCX_1_err = SSCX_read(W_SSCX, SSCX_1_readings);
 
+    pr0 = SSCX_to_psi(SSCX_0_readings[SSCX_PRESS_IDX]);
+    pr1 = SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]);
+
     // Once all the sensors are read, perform the control loop to calculate the new pump power
     // Initialize shared variables
     // Note - PID isn't implemented, this just uses the measured flowrate for bang-bang control
     float    disc_pump_power = 0;
     float    measurement = 0;
-    pid_loop(UART_TTP, pid_mode, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]), SSCX_to_psi(SSCX_0_readings[SSCX_PRESS_IDX]), pid_sign, pid_setpoint, measurement, disc_pump_power);
-
+    pid_loop(UART_TTP, pid_mode, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), pr1, pr0, pid_sign, pid_setpoint, measurement, disc_pump_power);
+    
+    // also calculate new filtered pressure
+    prev_p0 = pressure_lpf(prev_p0, pr0);
+    prev_p1 = pressure_lpf(prev_p1, pr1);
+    
     // Send an update only if the reading has been done
     if (flag_send_update) {
       flag_send_update = false;
@@ -387,13 +409,13 @@ void loop() {
         Serial.print("SSCX_0 Error:    ");
         Serial.println(SSCX_0_err, BIN);
         Serial.print("Pressure (psi): ");
-        Serial.println(SSCX_to_psi(SSCX_0_readings[SSCX_PRESS_IDX]));
+        Serial.println(pr0);
         Serial.print("Temp (deg C):  ");
         Serial.println(SSCX_to_celsius(SSCX_0_readings[SSCX_TEMP_IDX]));
         Serial.print("SSCX_1 Error:    ");
         Serial.println(SSCX_1_err, BIN);
         Serial.print("Pressure (psi): ");
-        Serial.println(SSCX_to_psi(SSCX_1_readings[SSCX_PRESS_IDX]));
+        Serial.println(pr1);
         Serial.print("Temp (deg C):  ");
         Serial.println(SSCX_to_celsius(SSCX_1_readings[SSCX_TEMP_IDX]));
 
@@ -664,8 +686,12 @@ void loop() {
       internal_program = INTERNAL_PROGRAM_CLEAR_LINES;
       break;
     case INTERNAL_PROGRAM_CLEAR_LINES:
-      // if we detect fluid in the lines (i.e. no bubbles in either line), reset the timer
-      if (!OPX350_read(OCB350_1_LOGIC) || !OPX350_read(OCB350_0_LOGIC)) {
+      // if we detect fluid in the lines (i.e. no bubbles in either line and no spikes in pressure), reset the timer
+      bubbles_present += !OPX350_read(OCB350_1_LOGIC);
+      bubbles_present += !OPX350_read(OCB350_1_LOGIC);
+      bubbles_present += (500 * abs(prev_p0 - pr0) > THRESH);
+      bubbles_present += (500 * abs(prev_p1 - pr1) > THRESH);
+      if (bubbles_present > 0) {
         internal_program = INTERNAL_PROGRAM_CLEAR_LINES_START;
         if (DEBUG_WITH_SERIAL) {
           Serial.println("Fluid still present!");
@@ -733,7 +759,6 @@ void loop() {
       else {
         internal_next = INTERNAL_PROGRAM_IDLE;
       }
-      internal_next = INTERNAL_PROGRAM_UNLOAD_1;
       internal_program = INTERNAL_PROGRAM_CLEAR_LINES_START;
       break;
     case INTERNAL_PROGRAM_PREUSE_CHECK_PRESSURE:
@@ -968,4 +993,9 @@ float vol_inc(float prev_vol, float rate, uint16_t dt, bool air_flag) {
   else {
     return prev_vol + dt * rate / (60.0 * 1000.0 * 1000.0);
   }
+}
+
+float pressure_lpf(float prev, float current){
+  prev += DECAY * (current - prev);
+  return prev;
 }

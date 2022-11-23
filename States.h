@@ -36,8 +36,9 @@
 #define FLOWRATE_LOOP 3
 
 // bang-bang params
-#define UPPER_FLOW_THRESH 100
-#define LOWER_FLOW_THRESH 20
+#define UPPER_FLOW_THRESH 2000
+#define LOWER_FLOW_THRESH 200
+#define PUMP_PWR_mW_GO     50   
 
 // Function headers
 void pid_loop(HardwareSerial &S, uint8_t mode, float flow_reading, float vacuum_reading, float pressure_reading, int8_t sign, float setpoint, float &measurement, float &disc_pump_power);
