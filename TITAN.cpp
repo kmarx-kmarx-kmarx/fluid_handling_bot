@@ -7,9 +7,9 @@
 
 */
 #include "TITAN.h"
- uint16_t uart_titan_rx_ptr = 0;
- byte uart_titan_rx_buffer[TITAN_BUFFER_SIZE];
- 
+uint16_t uart_titan_rx_ptr = 0;
+byte uart_titan_rx_buffer[TITAN_BUFFER_SIZE];
+
 /*
   -----------------------------------------------------------------------------
   DESCRIPTION: TITAN_init() initializes the selector valve serial communications.
@@ -57,50 +57,28 @@ bool write_selector_valve_read_command(HardwareSerial &S, char* cmd_str)
 {
   uint16_t idx;
   for (int i = 0; i < TITAN_N_TRIES; i++) // attempt 3 times
-  {
-    // empty the UART buffer
+  { // empty the UART buffer
     while (S.available())
       S.read();
 
     S.print(cmd_str);
-    S.flush(); // Wait for any transmitted data still in buffers to actually transmit
-    uint16_t time_elapsed_us = micros();
+    //S.flush(); // Wait for any transmitted data still in buffers to actually transmit
+    uint16_t time_elapsed_ms = millis();
     uart_titan_rx_ptr = 0;
-    while ( micros()-time_elapsed_us < TITAN_READ_TIMEOUT_uS) // timeout 
+    while ( millis() - time_elapsed_ms < TITAN_MOVE_TIMEOUT_mS) // timeout
     {
-      while (S.available()){
-        idx = min(TITAN_BUFFER_SIZE-1, uart_titan_rx_ptr++);
+      while (S.available()) {
+        idx = min(TITAN_BUFFER_SIZE - 1, uart_titan_rx_ptr++);
         uart_titan_rx_buffer[idx] = S.read();
       }
       if (uart_titan_rx_ptr > 0 && uart_titan_rx_buffer[uart_titan_rx_ptr - 1] == '\r')
+      {
+        uart_titan_rx_buffer[uart_titan_rx_ptr] = '\0';
         return true;
+      }
     }
   }
 
-  return false;
-}
-
-bool write_selector_valve_move_command(HardwareSerial &S, char* cmd_str)
-{
-  for (int i = 0; i < TITAN_N_TRIES; i++) 
-  {
-
-    // empty the UART buffer
-    while (S.available())
-      S.read();
-
-    S.print(cmd_str);
-    S.flush(); // Wait for any transmitted data still in buffers to actually transmit
-    elapsedMillis time_elapsed_ms;
-    uart_titan_rx_ptr = 0;
-    while ( time_elapsed_ms < 5000) // timeout after 5 second if the '/r' is not returned
-    {
-      while (S.available())
-        uart_titan_rx_buffer[uart_titan_rx_ptr++] = S.read();
-      if (uart_titan_rx_ptr > 0 && uart_titan_rx_buffer[uart_titan_rx_ptr - 1] == '\r') // can change to just read up to one byte
-        return true;
-    }
-  }
   return false;
 }
 
@@ -108,7 +86,7 @@ bool set_selector_valve_position(HardwareSerial &S, int pos)
 {
   char cmd_str[TITAN_BUFFER_SIZE];
   sprintf(cmd_str, "P%02X\r", pos);
-  return write_selector_valve_move_command(S, cmd_str);
+  return write_selector_valve_read_command(S, cmd_str);
 }
 
 bool check_selector_valve_position(HardwareSerial &S)

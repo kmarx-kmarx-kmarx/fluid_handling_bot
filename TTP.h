@@ -58,5 +58,6 @@ bool    TTP_set_target(HardwareSerial &S, float target);
 bool    TTP_get_status(HardwareSerial &S, uint16_t &error_code, int16_t &drive_freq, float &drive_pwr, float &drive_current, float &drive_voltage, float &power_limit);
 int16_t TTP_read_int(HardwareSerial &S, uint8_t reg);
 float   TTP_read_float(HardwareSerial &S, uint8_t reg);
+float   TTP_get_set_power();
 
 #endif /* TTP_H_ */

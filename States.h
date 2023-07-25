@@ -1,6 +1,6 @@
 /*
    STATES.h
-   Contains PID and main control loop state machine definitions and functions
+   Contains bang-bang and main control loop state machine definitions and functions
 
     Created on: 10/7/2022
         Author: Kevin Marx
@@ -15,34 +15,30 @@
 #include "TTP.h"
 
 // MCU internal program state definitions
-#define INTERNAL_PROGRAM_IDLE                        0
-#define INTERNAL_PROGRAM_LOAD_RESERVOIR              1
-#define INTERNAL_PROGRAM_LOAD_RESERVOIR_START        2
-#define INTENRAL_PROGRAM_LOAD_FLOW                   3
-#define INTERNAL_PROGRAM_UNLOAD_START                4
-#define INTERNAL_PROGRAM_UNLOAD_0                    5
-#define INTERNAL_PROGRAM_UNLOAD_1                    6
-#define INTERNAL_PROGRAM_PREUSE_CHECK_PRESSURE       7
-#define INTERNAL_PROGRAM_PREUSE_CHECK_VACUUM         8
-#define INTERNAL_PROGRAM_INITIAL                     9
-#define INTERNAL_PROGRAM_CLEAR_LINES_START          10
-#define INTERNAL_PROGRAM_CLEAR_LINES                11
+#define INTERNAL_STATE_IDLE                        0
+#define INTERNAL_STATE_LOAD_MEDIUM                 2
+#define INTERNAL_STATE_LOAD_MEDIUM_START           1
+#define INTERNAL_STATE_VENT_VB0                    3
+#define INTERNAL_STATE_UNLOAD_START                4
+#define INTERNAL_STATE_CLEAR_START                 5
+//#define INTERNAL_STATE_PREUSE_CHECK_PRESSURE       6
+//#define INTERNAL_STATE_PREUSE_CHECK_VACUUM         7
 
-// PID loop definitions
-// PID control parameters and variables
+#define INTERNAL_STATE_BUBBLE_START              8
+#define INTERNAL_STATE_BUBBLE_FINISH             9
+
+// bang-bang def
 #define IDLE_LOOP     0
-#define VACUUM_LOOP   1
-#define PRESSURE_LOOP 2
-#define FLOWRATE_LOOP 3
+#define BANG_BANG_FLOWRATE 1
 
 // bang-bang params
 #define UPPER_FLOW_THRESH 2000
 #define LOWER_FLOW_THRESH 200
-#define PUMP_PWR_mW_GO     50   
+#define PUMP_PWR_mW_GO    100 // 50   
 
 // Function headers
-void pid_loop(HardwareSerial &S, uint8_t mode, float flow_reading, float vacuum_reading, float pressure_reading, int8_t sign, float setpoint, float &measurement, float &disc_pump_power);
+void bang_bang_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, int8_t sign, float &measurement, float &disc_pump_power);
 
-void pid_reset();
+void set_bang_bang_params(float lower_thresh, float upper_thresh, float min_pwr, float max_pwr);
 
 #endif /* STATES_H_ */

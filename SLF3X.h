@@ -24,6 +24,8 @@
 #define MEDIUM_IPA          0x15  // Use calibration values for isopropyl alcohol (IPA)
 #define CRC_POLYNOMIAL      0x31  // polynomial for cyclic redundancy check (CRC)
 
+#define SLF3X_MAX_FLOWRATE 250.0  // max flowrate in uL/min
+
 #define SCALE_FACTOR_TEMP   200.0 // 200 per degrees Celsius
 #define SCALE_FACTOR_FLOW   10.0  // 10 per (microliter per minute)
 

@@ -81,9 +81,6 @@ bool OPX350_calib(uint8_t logic_pin, uint8_t calib_pin) {
     reading = digitalRead(logic_pin);
   } while (reading != LOW && t_init - millis() < CALIB_TIMEOUT_MS);
 
-  // debugging - get estimate of time it takes for calibration to succeed
-  Serial.println(millis() - t_init);
-
   // If calibration failed, reading is low
   return reading;
 

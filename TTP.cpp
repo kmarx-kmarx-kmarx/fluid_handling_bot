@@ -27,6 +27,8 @@
 */
 #include "TTP.h"
 
+float pwr = 0;
+
 /*
   -----------------------------------------------------------------------------
   DESCRIPTION: TTP_send_packet() sends a byte stream to the disc pump and reads the response back into a shared array.
@@ -385,6 +387,7 @@ bool TTP_set_pwr_limit(HardwareSerial &S, int16_t pwr_lim) {
 */
 bool TTP_set_target(HardwareSerial &S, float target) {
   target = constrain(target, TTP_MIN_PWR, TTP_MAX_PWR);
+  pwr = target;
   return TTP_write_register(S, TTP_SET_VALUE, target);
 }
 
@@ -432,4 +435,7 @@ bool TTP_get_status(HardwareSerial &S, uint16_t &error_code, int16_t &drive_freq
   success = success & (error_code != TTP_FLT_READ_ERR);
 
   return success;
+}
+float   TTP_get_set_power(){
+  return pwr;
 }
