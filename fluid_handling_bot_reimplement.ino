@@ -486,6 +486,7 @@ void loop() {
 
     digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
     SLF3X_0_err = SLF3X_read(PERFORM_CRC, W_SLF3X, SLF3X_0_readings);
+
     OCB350_0_reading = OPX350_read(OCB350_0_LOGIC);
     OCB350_1_reading = OPX350_read(OCB350_1_LOGIC);
     digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
@@ -509,8 +510,7 @@ void loop() {
     // Send an update only if the reading has been done
     if (flag_send_update) {
       flag_send_update = false;
-
-      send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, OCB350_0_reading, OCB350_1_reading, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  SLF3X_0_volume_uL, set_position, disc_pump_power);
+      send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, OCB350_0_reading, OCB350_1_reading, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], -1 * SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  -1 * SLF3X_0_volume_uL, set_position, disc_pump_power);
     }
 
     // integrate the flowrate:

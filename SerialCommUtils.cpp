@@ -45,14 +45,15 @@ void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_ex
   buffer_tx[14] = byte(pressure_1_raw >> 8); // pressure
   buffer_tx[15] = byte(pressure_1_raw & 0xFF ); // pressure
   buffer_tx[16] = byte(flowrate_0_raw >> 8);
-  buffer_tx[17] = byte(flowrate_0_raw & 0xFF );
+  buffer_tx[17] = byte(flowrate_0_raw & 0xFF);
   buffer_tx[18] = 0; // We don't have a second flow meter
   buffer_tx[19] = 0;
   buffer_tx[20] = byte(time_elapsed_s);
-  uint16_t volume_ul_uint16 = (volume_ul / VOLUME_UL_MAX) * UINT16_MAX;
-  buffer_tx[21] = byte(volume_ul_uint16 >> 8);
-  buffer_tx[22] = byte(volume_ul_uint16 & 0xFF);
+  int16_t volume_ul_int16 = (volume_ul / VOLUME_UL_MAX) * INT16_MAX;
+  buffer_tx[21] = byte(volume_ul_int16 >> 8);
+  buffer_tx[22] = byte(volume_ul_int16 & 0xFF);
   SerialUSB.write(buffer_tx, FROM_MCU_MSG_LENGTH);
+  
   return;
 }
 
