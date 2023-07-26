@@ -119,8 +119,8 @@ uint8_t bang_bang_mode = IDLE_LOOP;
 #define READ_SENSORS_INTERVAL_US 5000
 volatile bool flag_read_sensors = false;
 IntervalTimer Timer_read_sensors_input;
-// Set flag to send updates every 20 ms
-#define SEND_UPDATE_INTERVAL_US 20000
+// Set flag to send updates every 60 ms
+#define SEND_UPDATE_INTERVAL_US 60000
 volatile bool flag_send_update = false;
 IntervalTimer Timer_send_update_input;
 
@@ -146,11 +146,17 @@ void setup() {
   analogWriteResolution(10);
 
   while (!Serial) {
-    delay(1);
+    delay(10);
   }
 
   Timer_read_sensors_input.begin(set_read_sensors_flag, READ_SENSORS_INTERVAL_US);
   Timer_send_update_input.begin(set_send_update_flag, SEND_UPDATE_INTERVAL_US);
+  // Initialize pressure and flowrate sensors
+  SSCX_init(W_SSCX);
+  digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
+  delay(10);
+  SLF3X_init(W_SLF3X, MEDIUM_WATER);
+
 }
 
 
@@ -213,6 +219,7 @@ void loop() {
           break;
         // Init the flow sensor
         case INITIALIZE_FLOW_SENSOR:
+          digitalWrite(PIN_SENSOR_SELECT, SELECT_SENSOR_0);
           init_result = SLF3X_init(W_SLF3X, MEDIUM_WATER);
           if (init_result)
             command_execution_status = COMPLETED_WITHOUT_ERRORS;
@@ -224,7 +231,7 @@ void loop() {
           // Try to read from the disc pump - disc pump must be initialized first to ensure the lines are clear for the bubble sensor
           cmd_time = (uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
 
-          set_valves_pressure();
+          set_valves_vacuum();
           TTP_set_target(UART_TTP, PUMP_PWR_mW_GO);
           t0 = millis();
           internal_state = INTERNAL_STATE_BUBBLE_START;
@@ -266,7 +273,7 @@ void loop() {
           // vol_load_uL ranges from 0 to VOL_uL_MAX, set by constant.
           vol_load_uL = float((uint32_t(payloads[6]) << 8) + uint32_t(payloads[7])) * VOL_uL_MAX / float(UINT16_MAX);
           // timeout time
-          cmd_time = (uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
+          cmd_time = (  uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
           t0 = millis();
           // Reset the flow integrator
           SLF3X_0_volume_uL = 0;
@@ -294,7 +301,7 @@ void loop() {
           // Start pumping open loop
           bang_bang_mode = IDLE_LOOP;
           // Need more power to move medium to VB1
-          TTP_set_target(UART_TTP, TTP_MAX_PWR);
+          TTP_set_target(UART_TTP, PUMP_PWR_mW_GO);
           // Go to state where we track filtered pressure 0
           internal_state = INTERNAL_STATE_UNLOAD_START;
           // timeout time
@@ -400,7 +407,7 @@ void loop() {
         reset_valves();
         OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
         init_result =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
-
+        delay(10);
         OPX350_init(OCB350_1_LOGIC, OCB350_1_CALIB);
         init_result = init_result && OPX350_calib(OCB350_1_LOGIC, OCB350_1_CALIB);
 
@@ -412,7 +419,6 @@ void loop() {
         // Otherwise, set a new timer to let the calibration finish
         else {
           t0 = millis();
-          digitalWrite(pin_valve_4, HIGH); // remove
           internal_state = INTERNAL_STATE_BUBBLE_FINISH;
         }
       }
@@ -422,14 +428,14 @@ void loop() {
       if (millis() - t0 < cmd_time)
         break;
       else {
-        digitalWrite(pin_valve_4, LOW); //remove
+        reset_valves();
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
         internal_state = INTERNAL_STATE_IDLE;
       }
       break;
     case INTERNAL_STATE_LOAD_MEDIUM_START:
       // if we didn't hit the fluid or timeout, break
-      if (((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) != 0) && ((millis() - t0) < cmd_time)) {
+      if ((((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) != 0) || OPX350_read(OCB350_0_LOGIC) ) && ((millis() - t0) < cmd_time)) {
         break;
       }
       // Otherwise, stop fluid flow
@@ -440,7 +446,7 @@ void loop() {
       digitalWrite(pin_valve_2, HIGH);
       internal_state = INTERNAL_STATE_IDLE;
 
-      if ((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) == 0)
+      if (((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) == 0) && !OPX350_read(OCB350_0_LOGIC))
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
       else if ((millis() - t0) >= cmd_time)
         command_execution_status = CMD_EXECUTION_ERROR;
@@ -448,23 +454,22 @@ void loop() {
       break;
     case INTERNAL_STATE_LOAD_MEDIUM:
       // Check bubble sensor - stop if fluid hits the bubble sensor or if the correct volume was drawn or if there's timeout
-      if (!OPX350_read(OCB350_1_LOGIC) || (SLF3X_0_volume_uL >= vol_load_uL) || (millis() - t0 > cmd_time)) {
-        TTP_set_target(UART_TTP, 0);
-        bang_bang_mode = IDLE_LOOP;
-        bang_bang_sign = 0;
-        digitalWrite(pin_valve_0, HIGH);
-        digitalWrite(pin_valve_1, LOW);
-        digitalWrite(pin_valve_2, HIGH);
-
-        internal_state = INTERNAL_STATE_IDLE;
-      }
-      // Report the correct execution status
-      if (!OPX350_read(OCB350_1_LOGIC) || (millis() - t0 > cmd_time)) {
+      if (OPX350_read(OCB350_1_LOGIC) && (SLF3X_0_volume_uL < vol_load_uL) && (millis() - t0 < cmd_time))
+        break;
+      else if (!OPX350_read(OCB350_1_LOGIC) || (millis() - t0 >= cmd_time))
         command_execution_status = CMD_EXECUTION_ERROR;
-      }
-      else if (SLF3X_0_volume_uL >= vol_load_uL) {
+      else if (SLF3X_0_volume_uL >= vol_load_uL)
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
-      }
+
+      TTP_set_target(UART_TTP, 0);
+      bang_bang_mode = IDLE_LOOP;
+      bang_bang_sign = 0;
+      digitalWrite(pin_valve_0, HIGH);
+      digitalWrite(pin_valve_1, LOW);
+      digitalWrite(pin_valve_2, HIGH);
+
+      internal_state = INTERNAL_STATE_IDLE;
+
       break;
     default:
       break;
@@ -557,7 +562,7 @@ void set_valves_vacuum() {
   digitalWrite(pin_valve_4, HIGH);
   return;
 }
-void set_valves_to_vb1(){
+void set_valves_to_vb1() {
   // air gets sucked out of the first vacuum bottle and pushed into the reservior
 
   // valve 0 connect to reservior
