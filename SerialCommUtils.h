@@ -54,6 +54,7 @@ byte 23-24  : reserved
 #define CLEAR_MEDIUM_START 10
 #define SET_SOLENOID_VALVES   11
 #define LOAD_MEDIUM_VOLUME_START 12
+#define UNLOAD_MEDIUM_VOLUME_START 16
 #define VENT_VB0 13
 #define INITIALIZE_SELECTOR_VALVE 14
 #define SET_SELECTOR_VALVE 15
@@ -65,7 +66,7 @@ byte 23-24  : reserved
 #define CONSTANT_FLOW   2
 #define VOLUME_CONTROL   3
 
-// command execution status constants
+// command execution status constants  
 // search for class CMD_EXECUTION_STATUS in _def.py
 #define COMPLETED_WITHOUT_ERRORS   0
 #define IN_PROGRESS   1

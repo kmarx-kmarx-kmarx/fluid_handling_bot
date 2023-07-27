@@ -34,7 +34,7 @@
 // bang-bang params
 #define UPPER_FLOW_THRESH 500
 #define LOWER_FLOW_THRESH 200
-#define PUMP_PWR_mW_GO    120 // 50   
+#define PUMP_PWR_mW_GO    100 // 50   
 
 // Function headers
 void bang_bang_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, int8_t sign, float &measurement, float &disc_pump_power);

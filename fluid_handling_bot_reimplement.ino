@@ -259,14 +259,32 @@ void loop() {
           // turn off the pump
           TTP_set_target(UART_TTP, 0);
           // set valves to prevent fluid flow while venting
-          reset_valves();
-          digitalWrite(pin_valve_1, HIGH);
-          digitalWrite(pin_valve_5, HIGH);
+          set_valves_vacuum();
+          digitalWrite(pin_valve_1, LOW);
           // Connect VB0 to the pressure sensor
           digitalWrite(pin_valve_4, HIGH);
+          // start venting
+          digitalWrite(pin_valve_5, HIGH);
           t0 = millis();
           // Monitor pressure over time - prev_p1
           internal_state = INTERNAL_STATE_VENT_VB0;
+          break;
+        // Load a specified volume into the reservoir - run once LOAD_MEDIUM_VOLUME_START completed
+        case UNLOAD_MEDIUM_VOLUME_START:
+          // Set valves
+          set_valves_to_vb1();
+          // Reset integration
+          SLF3X_0_volume_uL = 0;
+          // Load the values from the payload
+          // vol_load_uL ranges from 0 to VOL_uL_MAX, set by constant.
+          vol_load_uL = (float((uint32_t(payloads[6]) << 8) + uint32_t(payloads[7])) / float(UINT16_MAX)) * VOL_uL_MAX;
+          // timeout time
+          cmd_time = (uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
+          t0 = millis();
+          // Start bang-bang ctrl
+          bang_bang_sign = 1; // flow is in the + dirn wrt the flow sensor
+          bang_bang_mode = BANG_BANG_FLOWRATE;
+          internal_state = INTERNAL_STATE_LOAD_MEDIUM;
           break;
         // Load a specified volume into the reservoir - run once LOAD_MEDIUM_START completed
         case LOAD_MEDIUM_VOLUME_START:
@@ -363,7 +381,7 @@ void loop() {
       // prevent fluid flow through valves
       digitalWrite(pin_valve_0, HIGH);
       digitalWrite(pin_valve_1, LOW);
-      digitalWrite(pin_valve_2, HIGH);
+      digitalWrite(pin_valve_2, LOW);
       digitalWrite(pin_valve_3, LOW);
       digitalWrite(pin_valve_4, HIGH);
       SLF3X_0_volume_uL = 0;
@@ -383,6 +401,11 @@ void loop() {
       // otherwise, stop the operation
       internal_state = INTERNAL_STATE_IDLE;
       // prevent fluid flow through valves
+      digitalWrite(pin_valve_0, HIGH);
+      digitalWrite(pin_valve_1, LOW);
+      digitalWrite(pin_valve_2, LOW);
+      digitalWrite(pin_valve_3, LOW);
+      digitalWrite(pin_valve_4, HIGH);
       digitalWrite(pin_valve_5, LOW);
       // check if we timed out - report error
       if (millis() - t0 >= cmd_time) {
