@@ -19,7 +19,7 @@ float prev_power = 0;
 float bb_lower_thresh = LOWER_FLOW_THRESH;
 float bb_upper_thresh = UPPER_FLOW_THRESH;
 float bb_min_pwr = TTP_MIN_PWR;
-float bb_max_pwr = PUMP_PWR_mW_GO;
+float bb_max_pwr = PUMP_PWR_mW_GO*1.5;
 
 /*  -----------------------------------------------------------------------------
   DESCRIPTION: bang_bang_flowrate() runs bang-bang control on the flowrate

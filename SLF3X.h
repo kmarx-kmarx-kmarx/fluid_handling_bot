@@ -36,6 +36,9 @@
 
 #define SLF3X_N_TRIES 10
 
+#define SLF3X_MAX_VAL_uL_MIN 3520 // value saturates at this amount uL/min
+#define SLF3X_FS_VAL_uL_MIN  2000 // value accuracy diminishes when flowrate exceeds this threshold
+
 // Function headers
 bool    SLF3X_init(TwoWire &W, uint8_t medium);
 uint8_t SLF3X_read(bool do_crc, TwoWire &W, int16_t *readings);

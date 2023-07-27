@@ -177,6 +177,7 @@ void loop() {
   int bubbles_present = 0;
   float pr0; // filtered pressure from sensor 0
   float pr1; // filtered pressure from sensor 1
+  vol_integrate_flag = true;
 
   // first, make sure we aren't already executing a command
   if (command_execution_status != IN_PROGRESS) {
@@ -258,10 +259,12 @@ void loop() {
           // turn off the pump
           TTP_set_target(UART_TTP, 0);
           // set valves to prevent fluid flow while venting
-          digitalWrite(pin_valve_4, HIGH);
-          digitalWrite(pin_valve_3, LOW);
+          reset_valves();
+          digitalWrite(pin_valve_1, HIGH);
           digitalWrite(pin_valve_5, HIGH);
-
+          // Connect VB0 to the pressure sensor
+          digitalWrite(pin_valve_4, HIGH);
+          t0 = millis();
           // Monitor pressure over time - prev_p1
           internal_state = INTERNAL_STATE_VENT_VB0;
           break;
@@ -271,13 +274,10 @@ void loop() {
           set_valves_vacuum();
           // Load the values from the payload
           // vol_load_uL ranges from 0 to VOL_uL_MAX, set by constant.
-          vol_load_uL = float((uint32_t(payloads[6]) << 8) + uint32_t(payloads[7])) * VOL_uL_MAX / float(UINT16_MAX);
+          vol_load_uL = (float((uint32_t(payloads[6]) << 8) + uint32_t(payloads[7])) / float(UINT16_MAX)) * VOL_uL_MAX;
           // timeout time
-          cmd_time = (  uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
+          cmd_time = (uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
           t0 = millis();
-          // Reset the flow integrator
-          SLF3X_0_volume_uL = 0;
-          vol_integrate_flag = true;
           // Start bang-bang ctrl
           bang_bang_sign = -1; // flow is in the - dirn wrt the flow sensor
           bang_bang_mode = BANG_BANG_FLOWRATE;
@@ -300,7 +300,6 @@ void loop() {
           set_valves_to_vb1();
           // Start pumping open loop
           bang_bang_mode = IDLE_LOOP;
-          // Need more power to move medium to VB1
           TTP_set_target(UART_TTP, PUMP_PWR_mW_GO);
           // Go to state where we track filtered pressure 0
           internal_state = INTERNAL_STATE_UNLOAD_START;
@@ -361,11 +360,13 @@ void loop() {
       }
       TTP_set_target(UART_TTP, 0);
       internal_state = INTERNAL_STATE_IDLE;
-      reset_valves();
       // prevent fluid flow through valves
       digitalWrite(pin_valve_0, HIGH);
       digitalWrite(pin_valve_1, LOW);
       digitalWrite(pin_valve_2, HIGH);
+      digitalWrite(pin_valve_3, LOW);
+      digitalWrite(pin_valve_4, HIGH);
+      SLF3X_0_volume_uL = 0;
       // check if we timed out
       if ((millis() - t0) / 1000 >= cmd_time) {
         command_execution_status = CMD_EXECUTION_ERROR;
@@ -377,34 +378,30 @@ void loop() {
       break;
     case INTERNAL_STATE_VENT_VB0:
       // if we didn't timeout AND we didn't hit the vacuum setpoint, break
-      if ((millis() - t0 < cmd_time) && (prev_p1 > setpoint))
+      if ((millis() - t0 < cmd_time) && (prev_p1 < setpoint))
         break;
       // otherwise, stop the operation
-      else {
-        digitalWrite(pin_valve_5, LOW);
-        digitalWrite(pin_valve_4, LOW);
-        digitalWrite(pin_valve_3, LOW);
-        internal_state = INTERNAL_STATE_IDLE;
-      }
-
+      internal_state = INTERNAL_STATE_IDLE;
+      // prevent fluid flow through valves
+      digitalWrite(pin_valve_5, LOW);
       // check if we timed out - report error
       if (millis() - t0 >= cmd_time) {
         command_execution_status = CMD_EXECUTION_ERROR;
       }
       // check if we hit pressure target - return no error
-      else if (prev_p1 <= setpoint) {
+      else {
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
       }
       break;
     // Calibrate the bubble sensors
     case INTERNAL_STATE_BUBBLE_START:
       // wait for the lines to clear
-      if (millis() - t0 < cmd_time)
-        break;
+      if (millis() - t0 < cmd_time){}
+//        break;
       // once sufficient time has elaped, turn off the disc pump and calibrate the sensors
       else {
         TTP_set_target(UART_TTP, 0);
-        reset_valves();
+//        reset_valves();
         OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
         init_result =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
         delay(10);
@@ -444,6 +441,8 @@ void loop() {
       digitalWrite(pin_valve_0, HIGH);
       digitalWrite(pin_valve_1, LOW);
       digitalWrite(pin_valve_2, HIGH);
+      digitalWrite(pin_valve_3, LOW);
+      digitalWrite(pin_valve_4, HIGH);
       internal_state = INTERNAL_STATE_IDLE;
 
       if (((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) == 0) && !OPX350_read(OCB350_0_LOGIC))
@@ -454,11 +453,15 @@ void loop() {
       break;
     case INTERNAL_STATE_LOAD_MEDIUM:
       // Check bubble sensor - stop if fluid hits the bubble sensor or if the correct volume was drawn or if there's timeout
-      if (OPX350_read(OCB350_1_LOGIC) && (SLF3X_0_volume_uL < vol_load_uL) && (millis() - t0 < cmd_time))
+      // also stop if flowrate saturates
+      //OPX350_read(OCB350_1_LOGIC) &&  - replace with better overfill detection
+      // && !OPX350_read(OCB350_0_LOGIC) - replace with better bubble detection
+      if ((abs(SLF3X_0_volume_uL) < vol_load_uL) && ((millis() - t0)/1000 < cmd_time) && (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) < SLF3X_FS_VAL_uL_MIN) )
         break;
-      else if (!OPX350_read(OCB350_1_LOGIC) || (millis() - t0 >= cmd_time))
+      // !OPX350_read(OCB350_1_LOGIC) || || OPX350_read(OCB350_0_LOGIC)
+      else if (((millis() - t0)/1000 >= cmd_time) || (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) >= SLF3X_FS_VAL_uL_MIN))
         command_execution_status = CMD_EXECUTION_ERROR;
-      else if (SLF3X_0_volume_uL >= vol_load_uL)
+      else
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
 
       TTP_set_target(UART_TTP, 0);
@@ -467,6 +470,8 @@ void loop() {
       digitalWrite(pin_valve_0, HIGH);
       digitalWrite(pin_valve_1, LOW);
       digitalWrite(pin_valve_2, HIGH);
+      digitalWrite(pin_valve_3, LOW);
+      digitalWrite(pin_valve_4, HIGH);
 
       internal_state = INTERNAL_STATE_IDLE;
 
@@ -510,6 +515,9 @@ void loop() {
     // Send an update only if the reading has been done
     if (flag_send_update) {
       flag_send_update = false;
+      // no fluid -> no flow
+      if (SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID)
+        SLF3X_0_readings[SLF3X_FLOW_IDX] = 0;
       send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, OCB350_0_reading, OCB350_1_reading, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], -1 * SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  -1 * SLF3X_0_volume_uL, set_position, disc_pump_power);
     }
 
