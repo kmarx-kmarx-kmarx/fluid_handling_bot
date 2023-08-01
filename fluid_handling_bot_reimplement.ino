@@ -77,6 +77,10 @@
 #define THRESH 10
 float prev_p0 = 0;
 float prev_p1 = 0;
+float pr0 = 0;
+float pr1 = 0;
+float peak_pressure = 0;
+bool past_peak = false;
 
 // OPX350 bubble sensor parameters
 // bubble sensor 0
@@ -175,8 +179,6 @@ void loop() {
   int16_t  SSCX_1_readings[2];
   uint8_t  SSCX_1_err;
   int bubbles_present = 0;
-  float pr0; // filtered pressure from sensor 0
-  float pr1; // filtered pressure from sensor 1
   vol_integrate_flag = true;
 
   // first, make sure we aren't already executing a command
