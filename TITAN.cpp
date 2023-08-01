@@ -105,10 +105,13 @@ bool set_selector_valve_position_blocking(HardwareSerial &S, int pos)
   bool command_sent = set_selector_valve_position(S, pos);
   if (command_sent == false)
     return false; // in the future can return an error code
-
-  while (check_selector_valve_position(S) == false)
+  uint32_t t0 = millis();
+  while ((check_selector_valve_position(S) == false) && ((millis()-t0) < (TITAN_MOVE_TIMEOUT_mS * TITAN_N_TRIES)))
   {
     delay(1);
+  }
+  if ((millis()-t0) >= (TITAN_MOVE_TIMEOUT_mS * TITAN_N_TRIES)){
+    return false;
   }
   return true;
 }

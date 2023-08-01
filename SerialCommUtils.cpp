@@ -3,7 +3,7 @@
 uint16_t current_command_uid = 0;
 uint8_t current_command = 0;
 
-void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_execution_status, uint8_t internal_program, bool liquid_present_0, bool liquid_present_1, uint8_t valveset, uint16_t NXP33996_state, int16_t pressure_0_raw, int16_t pressure_1_raw, int16_t flowrate_0_raw, uint8_t time_elapsed_s, float volume_ul, uint8_t selectorset, float disc_pump_power) {
+void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_execution_status, uint8_t internal_program, bool liquid_present_0, bool liquid_present_1, uint8_t valveset, uint16_t NXP33996_state, int16_t pressure_0_raw, int16_t pressure_1_raw, int16_t flowrate_0_raw, uint8_t time_elapsed_s, float volume_ul, uint8_t selectorset, float disc_pump_power, int16_t iir0, int16_t iir1) {
   /*
     byte 0-1  : computer -> MCU CMD counter (UID)
     byte 2    : cmd from host computer (error checking through check sum => no need to transmit back the parameters associated with the command)
@@ -52,6 +52,12 @@ void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_ex
   int16_t volume_ul_int16 = (volume_ul / VOLUME_UL_MAX) * INT16_MAX;
   buffer_tx[21] = byte(volume_ul_int16 >> 8);
   buffer_tx[22] = byte(volume_ul_int16 & 0xFF);
+
+  // IIR Filtered Pressure
+  buffer_tx[18] = byte(iir0 >> 8); // vac
+  buffer_tx[19] = byte(iir0 & 0xFF ); // vac
+  buffer_tx[23] = byte(iir1 >> 8);
+  buffer_tx[24] = byte(iir1 & 0xFF);
   SerialUSB.write(buffer_tx, FROM_MCU_MSG_LENGTH);
   
   return;

@@ -64,7 +64,7 @@ void bang_bang_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, int
   else if (measurement < bb_lower_thresh) {
     disc_pump_power = bb_max_pwr;
     if(sign==1)
-      disc_pump_power /= 8; //note - need higher power if vb1 is sealed
+      disc_pump_power /= 4; //note - need higher power if vb1 is sealed
   }
   else {
     disc_pump_power = prev_power;

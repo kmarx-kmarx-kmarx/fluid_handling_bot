@@ -35,5 +35,6 @@ void    SSCX_init(TwoWire &W);
 uint8_t SSCX_read(TwoWire &W, int16_t *readings);
 float   SSCX_to_celsius(int16_t raw_temp);
 float   SSCX_to_psi(int16_t raw_press);
+int16_t psi_to_SSCX(float psi);
 
 #endif /* SSCX_H_ */

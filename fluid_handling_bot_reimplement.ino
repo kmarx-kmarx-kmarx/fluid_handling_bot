@@ -73,7 +73,7 @@
 // SSCX pressure sensor parameters
 #define W_SSCX           Wire1
 // filter parameters (for pressure value LPF)
-#define DECAY  0.01
+#define DECAY  0.05
 #define THRESH 10
 float prev_p0 = 0;
 float prev_p1 = 0;
@@ -419,12 +419,12 @@ void loop() {
     // Calibrate the bubble sensors
     case INTERNAL_STATE_BUBBLE_START:
       // wait for the lines to clear
-      if (millis() - t0 < cmd_time){}
-//        break;
+      if (millis() - t0 < cmd_time) {}
+      //        break;
       // once sufficient time has elaped, turn off the disc pump and calibrate the sensors
       else {
         TTP_set_target(UART_TTP, 0);
-//        reset_valves();
+        //        reset_valves();
         OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
         init_result =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
         delay(10);
@@ -468,21 +468,23 @@ void loop() {
       digitalWrite(pin_valve_4, HIGH);
       internal_state = INTERNAL_STATE_IDLE;
 
-      if (((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) == 0) && !OPX350_read(OCB350_0_LOGIC))
-        command_execution_status = COMPLETED_WITHOUT_ERRORS;
-      else if ((millis() - t0) >= cmd_time)
+      if ((millis() - t0) >= cmd_time)
         command_execution_status = CMD_EXECUTION_ERROR;
+      else
+        command_execution_status = COMPLETED_WITHOUT_ERRORS;
 
       break;
     case INTERNAL_STATE_LOAD_MEDIUM:
       // Check bubble sensor - stop if fluid hits the bubble sensor or if the correct volume was drawn or if there's timeout
-      // also stop if flowrate saturates
+      // note - this feature has been removed also stop if flowrate saturates
       //OPX350_read(OCB350_1_LOGIC) &&  - replace with better overfill detection
       // && !OPX350_read(OCB350_0_LOGIC) - replace with better bubble detection
-      if ((abs(SLF3X_0_volume_uL) < vol_load_uL) && ((millis() - t0)/1000 < cmd_time) && (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) < SLF3X_FS_VAL_uL_MIN) )
+      // && (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) < SLF3X_FS_VAL_uL_MIN) - flow sensor saturating - ok for two step fill
+      if ((abs(SLF3X_0_volume_uL) < vol_load_uL) && ((millis() - t0) / 1000 < cmd_time)  )
         break;
       // !OPX350_read(OCB350_1_LOGIC) || || OPX350_read(OCB350_0_LOGIC)
-      else if (((millis() - t0)/1000 >= cmd_time) || (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) >= SLF3X_FS_VAL_uL_MIN))
+      //  || (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) >= SLF3X_FS_VAL_uL_MIN)
+      else if (((millis() - t0) / 1000 >= cmd_time))
         command_execution_status = CMD_EXECUTION_ERROR;
       else
         command_execution_status = COMPLETED_WITHOUT_ERRORS;
@@ -541,7 +543,7 @@ void loop() {
       // no fluid -> no flow
       if (SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID)
         SLF3X_0_readings[SLF3X_FLOW_IDX] = 0;
-      send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, OCB350_0_reading, OCB350_1_reading, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], -1 * SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  -1 * SLF3X_0_volume_uL, set_position, disc_pump_power);
+      send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, OCB350_0_reading, OCB350_1_reading, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], -1 * SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  -1 * SLF3X_0_volume_uL, set_position, disc_pump_power, psi_to_SSCX(prev_p0), psi_to_SSCX(prev_p1));
     }
 
     // integrate the flowrate:
@@ -619,8 +621,8 @@ void set_send_update_flag() {
   return;
 }
 float pressure_lpf(float prev, float current) {
-  prev += DECAY * (current - prev);
-  return prev;
+    prev += DECAY * (current - prev);
+    return prev;
 }
 float vol_inc(float prev_vol, float rate, uint16_t dt, bool air_flag) {
   if (air_flag) {
