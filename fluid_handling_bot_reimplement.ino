@@ -322,7 +322,7 @@ void loop() {
           set_valves_to_vb1();
           // Start pumping open loop
           bang_bang_mode = IDLE_LOOP;
-          TTP_set_target(UART_TTP, PUMP_PWR_mW_GO);
+          TTP_set_target(UART_TTP, (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));;
           // Go to state where we track filtered pressure 0
           internal_state = INTERNAL_STATE_UNLOAD_START;
           // timeout time
