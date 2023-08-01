@@ -74,7 +74,6 @@
 #define W_SSCX           Wire1
 // filter parameters (for pressure value LPF)
 #define DECAY  0.05
-#define THRESH 10
 float prev_p0 = 0;
 float prev_p1 = 0;
 float pr0 = 0;
@@ -316,6 +315,9 @@ void loop() {
           break;
         // Eject all into an open chamber (VB1) (must be open so pressure drop can be used to detect when all the fluid is ejected)
         case UNLOAD_MEDIUM_START:
+          // reset peak flag
+          past_peak = false;
+          peak_pressure=0;
           // Set valves
           set_valves_to_vb1();
           // Start pumping open loop
@@ -332,11 +334,14 @@ void loop() {
           break;
         // clear the fluid in the reservoir without changing the fluid in the closed chamber
         case CLEAR_MEDIUM_START:
+          // reset peak flag
+          past_peak = false;
+          peak_pressure=0;
           // Set valves
           set_valves_vacuum();
           // Start pumping open loop
           bang_bang_mode = IDLE_LOOP;
-          TTP_set_target(UART_TTP, PUMP_PWR_mW_GO);
+          TTP_set_target(UART_TTP, (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
           // Go to state where we track bubble sensors
           internal_state = INTERNAL_STATE_CLEAR_START;
           // timeout time in seconds
@@ -373,8 +378,18 @@ void loop() {
     case INTERNAL_STATE_CLEAR_START:
       // if we didn't time out AND we haven't had enough time pass yet, check bubble state and break
       if (((millis() - t0) / 1000 < cmd_time) && ((millis() - operation_time) / 1000 < payloads[1])) {
-        // if we detect fluid in the lines (i.e. no bubbles in either line and no spikes in pressure), reset the timer
-        if ((OPX350_read(OCB350_0_LOGIC) == false) || (OPX350_read(OCB350_1_LOGIC) == false) || (payloads[0] * abs(prev_p0 - pr0) > 1) || (payloads[0] * abs(prev_p1 - pr1) > 1) || ((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) == 0))
+        if(abs(prev_p1) > peak_pressure){
+          peak_pressure= abs(prev_p1);
+          TTP_set_target(UART_TTP, (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
+          past_peak = false;
+        }
+        
+        // check if pressure has fallen below threshold
+        if((abs(prev_p1) <= (peak_pressure * payloads[0] / 255)) && (past_peak==false)){
+          past_peak = true;
+          TTP_set_target(UART_TTP, 1+(uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
+        }
+        if(past_peak==false)
           operation_time = millis();
         break;
       }
