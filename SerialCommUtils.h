@@ -58,6 +58,7 @@ byte 23-24  : reserved
 #define VENT_VB0 13
 #define INITIALIZE_SELECTOR_VALVE 14
 #define SET_SELECTOR_VALVE 15
+#define SET_DB_TIME 17
 
 // command parameters
 // search for class MCU_CMD_PARAMETERS in _def.py
@@ -74,7 +75,7 @@ byte 23-24  : reserved
 #define CMD_EXECUTION_ERROR   3
 
 //uint8_t current_serial_command;
-void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_execution_status, uint8_t internal_program, bool liquid_present_0, bool liquid_present_1, uint8_t valveset, uint16_t NXP33996_state, int16_t pressure_0_raw, int16_t pressure_1_raw, int16_t flowrate_0_raw, uint8_t time_elapsed_s, float volume_ul, uint8_t selectorset, float disc_pump_power, int16_t iir0, int16_t iir1);
+void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_execution_status, uint8_t internal_program, uint8_t fluids, uint8_t valveset, uint16_t NXP33996_state, int16_t pressure_0_raw, int16_t pressure_1_raw, int16_t flowrate_0_raw, uint8_t time_elapsed_s, float volume_ul, uint8_t selectorset, float disc_pump_power, int16_t iir0, int16_t iir1);
 bool read_serial_command(byte payloads[TO_MCU_CMD_LENGTH - 3], uint8_t &cmd);
 
 #endif /* SERIALCOMMS_H_ */

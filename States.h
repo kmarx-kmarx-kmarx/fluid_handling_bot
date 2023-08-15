@@ -23,8 +23,6 @@
 #define INTERNAL_STATE_CLEAR_START                 5
 //#define INTERNAL_STATE_PREUSE_CHECK_PRESSURE       6
 //#define INTERNAL_STATE_PREUSE_CHECK_VACUUM         7
-
-#define INTERNAL_STATE_BUBBLE_START              8
 #define INTERNAL_STATE_BUBBLE_FINISH             9
 
 // bang-bang def

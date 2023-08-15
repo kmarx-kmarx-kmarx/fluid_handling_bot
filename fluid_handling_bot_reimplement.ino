@@ -46,7 +46,7 @@
         OPX350.h    : Functions for initializing and reading from the bubble sensor
         TTP.h       : Functions for initializing, reading from, and writing to the disc pump
         NXP33996.h  : For interacting with the SPI GPIO expander
-        TITAN.h     : Functions for initializing, reading from, and writing to the selector valve
+        RheoLink.h  : Functions for initializing, reading from, and writing to the selector valve
         SerialCommUtils.h: Handles serial commands and output.
         Wire.h      : For I2C communication
         IOdefs.h    : Pin defintions
@@ -63,7 +63,7 @@
 #include "SSCX.h"
 #include "OPX350.h"
 #include "States.h"
-#include "TITAN.h"
+#include "RheoLink.h"
 
 // System parameters
 
@@ -96,8 +96,10 @@ bool past_peak = false;
 #define TTP_PWR_LIM_mW       TTP_MAX_PWR
 
 // IDEX selector valve
-#define UART_Titan Serial5
+#define IDEX_ADDRESS 0x0E
+#define IDEX_WIRE Wire
 uint8_t set_position = 0;
+RheoLink selectorpump(IDEX_ADDRESS);
 
 // command management
 uint8_t  command_execution_status = COMPLETED_WITHOUT_ERRORS;
@@ -116,6 +118,19 @@ bool vol_integrate_flag = false;
 int8_t bang_bang_sign = 0;
 uint8_t bang_bang_mode = IDLE_LOOP;
 #define VOL_uL_MAX 5000
+
+// debouncing the fluid sensors
+#define DEBOUNCE_TIME_MS 500    // amount of time a signal has to be active before registering as debounced
+bool OCB350_0_debounced = false;
+bool OCB350_1_debounced = false;
+bool SLF3X_0_debounced  = false;
+uint16_t db_time_ms = DEBOUNCE_TIME_MS;
+uint32_t OCB350_0_db_time = 0;
+uint32_t OCB350_1_db_time = 0;
+uint32_t SLF3X_0_db_time = 0;
+
+// Flag for calibration
+bool calib_flag = false;
 
 // Timer parameters
 // Set flag to read the sensors every 5 ms
@@ -152,6 +167,9 @@ void setup() {
     delay(10);
   }
 
+  IDEX_WIRE.begin();
+
+
   Timer_read_sensors_input.begin(set_read_sensors_flag, READ_SENSORS_INTERVAL_US);
   Timer_send_update_input.begin(set_send_update_flag, SEND_UPDATE_INTERVAL_US);
   // Initialize pressure and flowrate sensors
@@ -187,6 +205,11 @@ void loop() {
       // We have a command in progress!
       command_execution_status = IN_PROGRESS; //unfactor this
       switch (serial_command) {
+        // Set the debounce time
+        case SET_DB_TIME:
+          db_time_ms = (uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
+          command_execution_status = COMPLETED_WITHOUT_ERRORS;
+          break;
         // Set the valve pins given by payload 0
         case SET_SOLENOID_VALVES:
           digitalWrite(pin_valve_0, (((payloads[0] >> 0) & 0x01) == 1));
@@ -232,11 +255,23 @@ void loop() {
         case INITIALIZE_BUBBLE_SENSORS:
           // Try to read from the disc pump - disc pump must be initialized first to ensure the lines are clear for the bubble sensor
           cmd_time = (uint32_t(payloads[2]) << 8) + uint32_t(payloads[3]);
-
-          set_valves_vacuum();
-          TTP_set_target(UART_TTP, PUMP_PWR_mW_GO);
           t0 = millis();
-          internal_state = INTERNAL_STATE_BUBBLE_START;
+          OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
+          init_result =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
+          delay(10);
+          OPX350_init(OCB350_1_LOGIC, OCB350_1_CALIB);
+          init_result = init_result && OPX350_calib(OCB350_1_LOGIC, OCB350_1_CALIB);
+
+          // If calibration failed, give up now
+          if (!init_result) {
+            command_execution_status = CMD_EXECUTION_ERROR;
+            internal_state = INTERNAL_STATE_IDLE;
+          }
+          // Otherwise, set a new timer to let the calibration finish
+          else {
+            t0 = millis();
+            internal_state = INTERNAL_STATE_BUBBLE_FINISH;
+          }
 
           break;
         // Set up bang-bang control - 0 and 1 are the lower and upper flowrate bounds (0-255), 2-3, 6-7 is the lower power and upper power setpoints
@@ -287,8 +322,12 @@ void loop() {
           bang_bang_mode = BANG_BANG_FLOWRATE;
           internal_state = INTERNAL_STATE_LOAD_MEDIUM;
           break;
+        // Calibrate flow sensor using bubble sensors - same operation as loading a volume but with different error/success condition
+        case CALIB_FLOW:
         // Load a specified volume into the reservoir - run once LOAD_MEDIUM_START completed
         case LOAD_MEDIUM_VOLUME_START:
+          // Set flag to indicate whether we are running calibration or loading.
+          calib_flag = (serial_command == CALIB_FLOW);
           // Set valves
           set_valves_vacuum();
           // Load the values from the payload
@@ -317,7 +356,7 @@ void loop() {
         case UNLOAD_MEDIUM_START:
           // reset peak flag
           past_peak = false;
-          peak_pressure=0;
+          peak_pressure = 0;
           // Set valves
           set_valves_to_vb1();
           // Start pumping open loop
@@ -336,7 +375,7 @@ void loop() {
         case CLEAR_MEDIUM_START:
           // reset peak flag
           past_peak = false;
-          peak_pressure=0;
+          peak_pressure = 0;
           // Set valves
           set_valves_vacuum();
           // Start pumping open loop
@@ -351,13 +390,13 @@ void loop() {
           operation_time = t0;
           break;
         case INITIALIZE_SELECTOR_VALVE:
-          if (TITAN_init(UART_Titan))
+          if (selectorpump.begin(IDEX_WIRE) == 0)
             command_execution_status = COMPLETED_WITHOUT_ERRORS;
           else
             command_execution_status = CMD_EXECUTION_ERROR;
           break;
         case SET_SELECTOR_VALVE:
-          if (set_selector_valve_position_blocking(UART_Titan, payloads[0])) {
+          if (selectorpump.send_command(RheoLink_POS, payloads[0]) == 0) {
             set_position = payloads[0];
             command_execution_status = COMPLETED_WITHOUT_ERRORS;
           }
@@ -378,18 +417,18 @@ void loop() {
     case INTERNAL_STATE_CLEAR_START:
       // if we didn't time out AND we haven't had enough time pass yet, check bubble state and break
       if (((millis() - t0) / 1000 < cmd_time) && ((millis() - operation_time) / 1000 < payloads[1])) {
-        if(abs(prev_p1) > peak_pressure){
-          peak_pressure= abs(prev_p1);
+        if (abs(prev_p1) > peak_pressure) {
+          peak_pressure = abs(prev_p1);
           TTP_set_target(UART_TTP, (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
           past_peak = false;
         }
-        
+
         // check if pressure has fallen below threshold
-        if((abs(prev_p1) <= (peak_pressure * payloads[0] / 255)) && (past_peak==false)){
+        if ((abs(prev_p1) <= (peak_pressure * payloads[0] / 255)) && (past_peak == false)) {
           past_peak = true;
-          TTP_set_target(UART_TTP, 1+(uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
+          TTP_set_target(UART_TTP, 1 + (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
         }
-        if(past_peak==false)
+        if (past_peak == false)
           operation_time = millis();
         break;
       }
@@ -434,32 +473,6 @@ void loop() {
       }
       break;
     // Calibrate the bubble sensors
-    case INTERNAL_STATE_BUBBLE_START:
-      // wait for the lines to clear
-      if (millis() - t0 < cmd_time) {}
-      //        break;
-      // once sufficient time has elaped, turn off the disc pump and calibrate the sensors
-      else {
-        TTP_set_target(UART_TTP, 0);
-        //        reset_valves();
-        OPX350_init(OCB350_0_LOGIC, OCB350_0_CALIB);
-        init_result =  OPX350_calib(OCB350_0_LOGIC, OCB350_0_CALIB);
-        delay(10);
-        OPX350_init(OCB350_1_LOGIC, OCB350_1_CALIB);
-        init_result = init_result && OPX350_calib(OCB350_1_LOGIC, OCB350_1_CALIB);
-
-        // If calibration failed, give up now
-        if (!init_result) {
-          command_execution_status = CMD_EXECUTION_ERROR;
-          internal_state = INTERNAL_STATE_IDLE;
-        }
-        // Otherwise, set a new timer to let the calibration finish
-        else {
-          t0 = millis();
-          internal_state = INTERNAL_STATE_BUBBLE_FINISH;
-        }
-      }
-      break;
     case INTERNAL_STATE_BUBBLE_FINISH:
       // wait for the calibration to finish
       if (millis() - t0 < cmd_time)
@@ -492,20 +505,35 @@ void loop() {
 
       break;
     case INTERNAL_STATE_LOAD_MEDIUM:
-      // Check bubble sensor - stop if fluid hits the bubble sensor or if the correct volume was drawn or if there's timeout
-      // note - this feature has been removed also stop if flowrate saturates
-      //OPX350_read(OCB350_1_LOGIC) &&  - replace with better overfill detection
-      // && !OPX350_read(OCB350_0_LOGIC) - replace with better bubble detection
-      // && (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) < SLF3X_FS_VAL_uL_MIN) - flow sensor saturating - ok for two step fill
-      if ((abs(SLF3X_0_volume_uL) < vol_load_uL) && ((millis() - t0) / 1000 < cmd_time)  )
-        break;
-      // !OPX350_read(OCB350_1_LOGIC) || || OPX350_read(OCB350_0_LOGIC)
-      //  || (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) >= SLF3X_FS_VAL_uL_MIN)
-      else if (((millis() - t0) / 1000 >= cmd_time))
-        command_execution_status = CMD_EXECUTION_ERROR;
-      else
-        command_execution_status = COMPLETED_WITHOUT_ERRORS;
-
+      // If we aren't calibrating, use the default error checking
+      if (!calib_flag) {
+        // Check bubble sensor - stop if fluid hits the bubble sensor or if the correct volume was drawn or if there's timeout
+        // or if the fluid has hit the second fluid sensor - reservior overfill condition
+        // note: removed flow sensor saturating err detection - ok for doing 2 step fill
+        // && (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) < SLF3X_FS_VAL_uL_MIN)
+        if ((abs(SLF3X_0_volume_uL) < vol_load_uL) && ((millis() - t0) / 1000 < cmd_time) && OCB350_1_debounced)
+          break;
+        // Return an error if we timed out or overfilled the reservior
+        // note: removed flow sensor saturating feature
+        //  || (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) >= SLF3X_FS_VAL_uL_MIN)
+        else if (((millis() - t0) / 1000 >= cmd_time) || !OCB350_1_debounced)
+          command_execution_status = CMD_EXECUTION_ERROR;
+        else
+          command_execution_status = COMPLETED_WITHOUT_ERRORS;
+      }
+      // Otherwise, we are calibrating and need different checks for errors
+      // We want to check for timeout, fluid sensor 1, and flow sensor saturation
+      else {
+        // Keep going if we are under the time limit and haven't hit the fluid sensor and are under the max flowrate
+        if (((millis() - t0) / 1000 < cmd_time) && OCB350_1_debounced && (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) < SLF3X_FS_VAL_uL_MIN))
+          break;
+        // Report an error if we timed out or saturated the flow sensor
+        else if (((millis() - t0) / 1000 >= cmd_time) || (abs(SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX])) >= SLF3X_FS_VAL_uL_MIN))
+          command_execution_status = CMD_EXECUTION_ERROR;
+        else
+          command_execution_status = COMPLETED_WITHOUT_ERRORS;
+      }
+      // Stop pump. Note that fluid will still flow a bit - imperfect seal
       TTP_set_target(UART_TTP, 0);
       bang_bang_mode = IDLE_LOOP;
       bang_bang_sign = 0;
@@ -554,13 +582,46 @@ void loop() {
     prev_p0 = pressure_lpf(prev_p0, pr0);
     prev_p1 = pressure_lpf(prev_p1, pr1);
 
+    // Debouncing
+    // OCB350 0 and 1 are active low
+    if (OCB350_0_reading == 1) {
+      OCB350_0_db_time = millis();
+      OCB350_0_debounced = true;
+    }
+    else if (millis() - OCB350_0_db_time > DEBOUNCE_TIME_MS) {
+      OCB350_0_debounced = false;
+    }
+    if (OCB350_1_reading == 1) {
+      OCB350_1_db_time = millis();
+      OCB350_1_debounced = true;
+    }
+    else if (millis() - OCB350_1_db_time > DEBOUNCE_TIME_MS) {
+      OCB350_1_debounced = false;
+    }
+    // Flow sensor is also active low
+    if ((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) != 0) {
+      SLF3X_0_db_time = millis();
+      SLF3X_0_debounced = true;
+    }
+    else if (millis() - SLF3X_0_db_time > DEBOUNCE_TIME_MS) {
+      SLF3X_0_debounced = false;
+    }
+
     // Send an update only if the reading has been done
     if (flag_send_update) {
       flag_send_update = false;
       // no fluid -> no flow
       if (SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID)
         SLF3X_0_readings[SLF3X_FLOW_IDX] = 0;
-      send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, OCB350_0_reading, OCB350_1_reading, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], -1 * SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  -1 * SLF3X_0_volume_uL, set_position, disc_pump_power, psi_to_SSCX(prev_p0), psi_to_SSCX(prev_p1));
+      // package the fluid sensors into a byte
+      byte fluids = 0;
+      fluids |= ((OCB350_0_reading) & 0x01) << 0;
+      fluids |= ((OCB350_0_debounced) & 0x01) << 1;
+      fluids |= ((OCB350_1_reading) & 0x01) << 2;
+      fluids |= ((OCB350_1_debounced) & 0x01) << 3;
+      fluids |= (((SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID) != 0) & 0x01) << 4;
+      fluids |= ((SLF3X_0_debounced) & 0x01) << 5;
+      send_serial_data(TTP_MAX_PWR, VOL_uL_MAX, command_execution_status, internal_state, fluids, get_valve_state(), 0, SSCX_0_readings[SSCX_PRESS_IDX], SSCX_1_readings[SSCX_PRESS_IDX], -1 * SLF3X_0_readings[SLF3X_FLOW_IDX], (millis() - t0) / 1000.0,  -1 * SLF3X_0_volume_uL, set_position, disc_pump_power, psi_to_SSCX(prev_p0), psi_to_SSCX(prev_p1));
     }
 
     // integrate the flowrate:
@@ -568,7 +629,6 @@ void loop() {
       SLF3X_0_volume_uL = vol_inc(SLF3X_0_volume_uL, SLF3X_to_uLmin(SLF3X_0_readings[SLF3X_FLOW_IDX]), (millis() - SLF3X_0_dt), (SLF3X_0_readings[SLF3X_FLAG_IDX] & SLF3X_NO_FLUID));
       SLF3X_0_dt  = millis();
     }
-
   }
 }
 void reset_valves() {
@@ -638,8 +698,8 @@ void set_send_update_flag() {
   return;
 }
 float pressure_lpf(float prev, float current) {
-    prev += DECAY * (current - prev);
-    return prev;
+  prev += DECAY * (current - prev);
+  return prev;
 }
 float vol_inc(float prev_vol, float rate, uint16_t dt, bool air_flag) {
   if (air_flag) {

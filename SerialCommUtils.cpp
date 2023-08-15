@@ -3,7 +3,7 @@
 uint16_t current_command_uid = 0;
 uint8_t current_command = 0;
 
-void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_execution_status, uint8_t internal_program, bool liquid_present_0, bool liquid_present_1, uint8_t valveset, uint16_t NXP33996_state, int16_t pressure_0_raw, int16_t pressure_1_raw, int16_t flowrate_0_raw, uint8_t time_elapsed_s, float volume_ul, uint8_t selectorset, float disc_pump_power, int16_t iir0, int16_t iir1) {
+void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_execution_status, uint8_t internal_program, uint8_t fluids, uint8_t valveset, uint16_t NXP33996_state, int16_t pressure_0_raw, int16_t pressure_1_raw, int16_t flowrate_0_raw, uint8_t time_elapsed_s, float volume_ul, uint8_t selectorset, float disc_pump_power, int16_t iir0, int16_t iir1) {
   /*
     byte 0-1  : computer -> MCU CMD counter (UID)
     byte 2    : cmd from host computer (error checking through check sum => no need to transmit back the parameters associated with the command)
@@ -30,9 +30,7 @@ void send_serial_data(float ttp_max_pwr, float VOLUME_UL_MAX, uint8_t command_ex
   buffer_tx[3] = command_execution_status;
   buffer_tx[4] = internal_program;
 
-  buffer_tx[5] = 0;
-  buffer_tx[5] = buffer_tx[5] | ((liquid_present_0 & 1) << 3); // downstream
-  buffer_tx[5] = buffer_tx[5] | ((liquid_present_1 & 1) << 2); // upstream
+  buffer_tx[5] = fluids;
 
   buffer_tx[6] =  byte(valveset);
   buffer_tx[7] =  byte(NXP33996_state >> 8);
