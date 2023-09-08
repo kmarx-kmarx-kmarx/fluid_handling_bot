@@ -18,8 +18,19 @@
 float prev_power = 0;
 float bb_lower_thresh = LOWER_FLOW_THRESH;
 float bb_upper_thresh = UPPER_FLOW_THRESH;
-float bb_min_pwr = TTP_MIN_PWR;
-float bb_max_pwr = PUMP_PWR_mW_GO*1.5;
+float bb_min_pwr = 10;
+float bb_max_pwr = PUMP_PWR_mW_GO;
+
+// PID params
+float pid_kp = ;
+float pid_ki = ;
+float pid_kd = ;
+float pid_iwind = ;
+float pid_ii = 0;
+float pid_e1 = 0;
+
+uint8_t prev_mode = IDLE_LOOP;
+
 
 /*  -----------------------------------------------------------------------------
   DESCRIPTION: bang_bang_flowrate() runs bang-bang control on the flowrate
@@ -54,36 +65,56 @@ float bb_max_pwr = PUMP_PWR_mW_GO*1.5;
       TTP.h:   for setting the disc pump power and power macros
   -----------------------------------------------------------------------------
 */
-void bang_bang_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, int8_t sign, float &measurement, float &disc_pump_power) {
+void closed_loop_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, float setpoint, int8_t sign, float &measurement, float &disc_pump_power) {
+  measurement = flow_reading * sign; // normalize flor fluid flowing in/out
+  setpoint = abs(setpoint);
   // bang-bang implementation - placeholder while debugging pid
-  // we only care about managing flowrate - prevent the flow sensor from saturating
-  measurement = flow_reading * sign;
-  if (measurement > bb_upper_thresh) {
-    disc_pump_power = bb_min_pwr;
-  }
-  else if (measurement < bb_lower_thresh) {
-    disc_pump_power = bb_max_pwr;
-    if(sign==1)
-      disc_pump_power /= 4; //note - need higher power if vb1 is sealed
-  }
-  else {
-    disc_pump_power = prev_power;
-  }
-  prev_power = disc_pump_power;
-
-  // set disc pump power
   if (mode == BANG_BANG_FLOWRATE) {
+    if (measurement > bb_upper_thresh) {
+      disc_pump_power = bb_min_pwr;
+    }
+    else if (measurement < bb_lower_thresh) {
+      disc_pump_power = bb_max_pwr;
+      if (sign == 1)
+        disc_pump_power /= 4; //note - need higher power if vb1 is sealed
+        disc_pump_power = max(1, disc_pump_power);
+    }
+    else {
+      disc_pump_power = prev_power;
+    }
+    prev_power = disc_pump_power;
+  }
+  else if (mode == PID_FLOWRATE){
+    // do PID
+    // check if we are just starting - reset the error and integral
+    if (prev_mode != mode){
+      prev_mode = mode;
+      pid_e1 = 0;
+      pid_ii = 0;
+    }
+    
+
+    
+  }
+  // set disc pump power
+  if (mode != IDLE_LOOP) {
     TTP_set_target(S, disc_pump_power);
   }
-  
+
   return;
 }
 
-void set_bang_bang_params(float lower_thresh, float upper_thresh, float min_pwr, float max_pwr) {
+void set_bang_bang_params(float kp, float ki, float kd, float iwind) {
   // Set the shared variables
   bb_lower_thresh = constrain(lower_thresh, TTP_MIN_PWR, TTP_MAX_PWR);
   bb_upper_thresh = constrain(upper_thresh, TTP_MIN_PWR, TTP_MAX_PWR);
   bb_min_pwr = min_pwr;
   bb_max_pwr = max_pwr;
+  return;
+}
+
+void set_pid_params(float lower_thresh, float upper_thresh, float min_pwr, float max_pwr) {
+  // Set the shared variables
+  
   return;
 }

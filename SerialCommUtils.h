@@ -59,6 +59,7 @@ byte 23-24  : reserved
 #define INITIALIZE_SELECTOR_VALVE 14
 #define SET_SELECTOR_VALVE 15
 #define SET_DB_TIME 17
+#define CALIB_FLOW 18
 
 // command parameters
 // search for class MCU_CMD_PARAMETERS in _def.py

@@ -28,15 +28,24 @@
 // bang-bang def
 #define IDLE_LOOP     0
 #define BANG_BANG_FLOWRATE 1
+#define PID_FLOWRATE 2
 
 // bang-bang params
-#define UPPER_FLOW_THRESH 500
-#define LOWER_FLOW_THRESH 200
+#define UPPER_FLOW_THRESH 1500
+#define LOWER_FLOW_THRESH 1000
 #define PUMP_PWR_mW_GO    100 // 50   
 
+// PID params
+#define KP
+#define KI
+#define KD
+#define IWIND
+
 // Function headers
-void bang_bang_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, int8_t sign, float &measurement, float &disc_pump_power);
+void closed_loop_flowrate(HardwareSerial &S, uint8_t mode, float flow_reading, float setpoint, int8_t sign, float &measurement, float &disc_pump_power);
 
 void set_bang_bang_params(float lower_thresh, float upper_thresh, float min_pwr, float max_pwr);
+
+void set_pid_params(float kp, float ki, float kd, float windup);
 
 #endif /* STATES_H_ */

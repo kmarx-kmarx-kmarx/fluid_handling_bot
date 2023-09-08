@@ -120,7 +120,7 @@ uint8_t bang_bang_mode = IDLE_LOOP;
 #define VOL_uL_MAX 5000
 
 // debouncing the fluid sensors
-#define DEBOUNCE_TIME_MS 500    // amount of time a signal has to be active before registering as debounced
+#define DEBOUNCE_TIME_MS 1000    // amount of time a signal has to be active before registering as debounced
 bool OCB350_0_debounced = false;
 bool OCB350_1_debounced = false;
 bool SLF3X_0_debounced  = false;
@@ -411,20 +411,22 @@ void loop() {
       }
     }
   }
-
+  float target_pressure;
   switch (internal_state) {
     case INTERNAL_STATE_UNLOAD_START:
     case INTERNAL_STATE_CLEAR_START:
+      // use p1 for clear, p0 for unload
+      target_pressure = (internal_state == INTERNAL_STATE_UNLOAD_START)*prev_p0 + (internal_state == INTERNAL_STATE_CLEAR_START)*prev_p1;
       // if we didn't time out AND we haven't had enough time pass yet, check bubble state and break
       if (((millis() - t0) / 1000 < cmd_time) && ((millis() - operation_time) / 1000 < payloads[1])) {
-        if (abs(prev_p1) > peak_pressure) {
-          peak_pressure = abs(prev_p1);
+        if (abs(target_pressure) > peak_pressure) {
+          peak_pressure = abs(target_pressure);
           TTP_set_target(UART_TTP, (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
           past_peak = false;
         }
 
         // check if pressure has fallen below threshold
-        if ((abs(prev_p1) <= (peak_pressure * payloads[0] / 255)) && (past_peak == false)) {
+        if ((abs(target_pressure) <= (peak_pressure * payloads[0] / 255)) && (past_peak == false)) {
           past_peak = true;
           TTP_set_target(UART_TTP, 1 + (uint32_t(payloads[6]) << 8) + uint32_t(payloads[7]));
         }
@@ -532,6 +534,9 @@ void loop() {
           command_execution_status = CMD_EXECUTION_ERROR;
         else
           command_execution_status = COMPLETED_WITHOUT_ERRORS;
+
+        // Stop integrating volume - preserve the current volume
+        vol_integrate_flag = false;
       }
       // Stop pump. Note that fluid will still flow a bit - imperfect seal
       TTP_set_target(UART_TTP, 0);

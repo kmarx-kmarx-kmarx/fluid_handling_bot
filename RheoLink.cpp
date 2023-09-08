@@ -52,7 +52,7 @@
   LOCAL VARIABLES: NONE
 
   SHARED VARIABLES:
-     uint8_t address_w_, address_r_: write and read addresses of the selector valve
+     uint8_t address_: the address of the selector valve
 
   GLOBAL VARIABLES: None
 
@@ -70,12 +70,13 @@ RheoLink::RheoLink(uint8_t address)
   -----------------------------------------------------------------------------
   DESCRIPTION: begin() initializes the I2C bus
 
-  OPERATION:   We store the I2C bus object pointer to a local variable and
+  OPERATION:   We store the I2C bus object pointer to a local variable
 
   ARGUMENTS:
       TwoWire *w:      Pointer to TwoWire object for I2C
 
-  RETURNS: NONE
+  RETURNS: 
+      uint8_t err: I2C transmission error code
 
   INPUTS / OUTPUTS: NONE
 
